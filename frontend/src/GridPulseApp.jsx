@@ -66,13 +66,11 @@ function formatCurrency(value, currency = "INR", region = "India") {
   };
 
   const currencyInfo = currencyMeta[currency] || currencyMeta.INR;
-  const formatted = new Intl.NumberFormat(currencyInfo.locale, {
+  return new Intl.NumberFormat(currencyInfo.locale, {
     style: "currency",
-    currency,
+    currency: currencyInfo === currencyMeta[currency] ? currency : "INR",
     maximumFractionDigits: 2,
-  }).format(money);
-
-  return `${currencyInfo.symbol}${formatted.replace(/^[^\d]*/, "").trim()}`.replace(/\s+/g, " ");
+  }).format(money).replace(/\u00a0/g, " ").trim();
 }
 
 function formatRate(value, preferences) {
@@ -81,9 +79,11 @@ function formatRate(value, preferences) {
 }
 
 function formatMoneyText(text, preferences) {
-  return String(text ?? "").replace(/\$(\d+(?:\.\d+)?)/g, (_, amount) => (
-    formatCurrency(Number(amount), preferences.currency, preferences.region)
-  ));
+  const value = String(text ?? "");
+  const amountMatch = value.match(/-?\d+(?:\.\d+)?/);
+  if (!amountMatch || !preferences?.currency) return value;
+  const formatted = formatCurrency(Number(amountMatch[0]), preferences.currency, preferences.region);
+  return value.replace(/(?:[$€£₹]|د\.إ)?\s*-?\d+(?:\.\d+)?/, formatted);
 }
 
 const REGION_CURRENCY = {
@@ -2143,7 +2143,7 @@ function OwnerOverviewPage({ preferences }) {
   );
 }
 
-function OwnerChargingPage({ ocppStatus, ocppProtocol, respondingCount, testOcppConnection }) {
+function OwnerChargingPage({ ocppStatus, ocppProtocol, respondingCount, testOcppConnection, preferences }) {
   const { activeSessions, fleetChargers, sessionThroughput, siteUtilization } = useOwnerData();
   
   const handleExportSessions = () => {
@@ -2209,7 +2209,7 @@ function OwnerChargingPage({ ocppStatus, ocppProtocol, respondingCount, testOcpp
                 </span>
                 <span>{s.charger}</span>
                 <span>{s.soc}</span>
-                <span>{s.cost}</span>
+                <span>{formatCurrency(Number(String(s.cost).replace(/[^\d.-]/g, "")), preferences.currency, preferences.region)}</span>
               </div>
             ))}
           </div>
@@ -3114,6 +3114,7 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
             ocppProtocol={ocppProtocol}
             respondingCount={respondingCount}
             testOcppConnection={testOcppConnection}
+            preferences={preferences}
           />
         )}
         {page === "grid" && <OwnerGridPage preferences={preferences} />}
