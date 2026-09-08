@@ -11,7 +11,7 @@ import {
   ArrowUpRight, ArrowDownRight, BatteryCharging, Bell, ShieldOff,
   CloudRain, CloudSun, Droplets, Thermometer, Eye, CreditCard, Wallet, Users, Target, Fuel,
   Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu, Apple,
-  LocateFixed, RefreshCw, Navigation, FileText
+  LocateFixed, RefreshCw, Navigation, FileText, Upload, ShieldCheck, BadgeCheck, CalendarDays
 } from "lucide-react";
 
 import { C, STATUS_COLOR, CONFIDENCE_COLOR } from "./theme.js";
@@ -427,7 +427,7 @@ function ChartTooltip({ active, payload, label, unit }) {
 /* ---------------------------------------------------------------- */
 /*  Sidebar navigation — shared by both dashboards                   */
 /* ---------------------------------------------------------------- */
-function Sidebar({ items, active, onSelect }) {
+function Sidebar({ items, active, onSelect, bottom }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   return (
@@ -457,6 +457,7 @@ function Sidebar({ items, active, onSelect }) {
             </button>
           ))}
         </nav>
+        {bottom || null}
       </aside>
       
       {isMobileMenuOpen && (
@@ -466,6 +467,39 @@ function Sidebar({ items, active, onSelect }) {
         />
       )}
     </>
+  );
+}
+
+/* Pinned "My car" card on the left sidebar — glanceable vehicle snapshot. */
+function SidebarCarPanel({ vehicleProfile, soc, onNavigate }) {
+  const v = vehicleProfile || {};
+  const money = (n) => formatCurrency(n, "INR", "India");
+  const ins = v.insurance || {};
+  const puc = v.puc || {};
+  const valueLakh = v.marketValue ? `${(v.marketValue / 100000).toFixed(1)}L` : "—";
+  const valueInr = valueLakh !== "—" ? `₹${valueLakh}` : "—";
+  return (
+    <button
+      type="button"
+      className="g-sidebar-car"
+      onClick={() => onNavigate && onNavigate("garage")}
+      title="Open My car"
+    >
+      <div className="g-sidebar-car-top">
+        <span className="g-sidebar-car-icon"><Car size={14} /></span>
+        <span className="g-sidebar-car-name">
+          {v.manufacturer ? `${v.manufacturer} ${v.model}` : "My car"}
+        </span>
+        <ChevronRight size={13} style={{ color: C.textDimmer }} />
+      </div>
+      <div className="g-sidebar-car-plate">{formatPlate(v.registration || v.regRaw) || "—"}</div>
+      <div className="g-sidebar-car-stats">
+        <div><b>{soc != null ? `${Math.round(soc)}%` : "—"}</b><span>SoC</span></div>
+        <div><b>{valueInr}</b><span>Value</span></div>
+        <div><b style={{ color: ins.status === "Active" ? C.green : C.amber }}>{ins.status === "Active" ? "OK" : "Renew"}</b><span>Insurance</span></div>
+        <div><b style={{ color: puc.status === "Valid" ? C.green : C.amber }}>{puc.status === "Valid" ? "OK" : "Renew"}</b><span>PUC</span></div>
+      </div>
+    </button>
   );
 }
 
@@ -1181,6 +1215,310 @@ function VehicleOverviewPanel({ vehicle, preferences }) {
         </div>
       </div>
     </Card>
+  );
+}
+
+function DriverGaragePage({ preferences, vehicleProfile }) {
+  const { driverMetrics: baseMetrics, fastagId, fastagTransactions } = useDriverData();
+  const { live } = useLiveData();
+  const m = { ...baseMetrics, ...(vehicleProfile?.dashboardMetrics || {}) };
+  const v = vehicleProfile || {};
+  const specs = v.specs || {};
+  const money = (n) => formatCurrency(n, preferences.currency, preferences.region);
+  const plate = formatPlate(v.registration || v.regRaw) || "—";
+  const regKey = (v.regRaw || plate || "vehicle").replace(/[^A-Z0-9]/gi, "").toLowerCase();
+  const ins = v.insurance || {};
+  const puc = v.puc || {};
+  const soc = v.currentSoc ?? 0;
+
+  const [topup, setTopup] = useState(() => Number(localStorage.getItem(`gp_fastag_topup_${regKey}`) || 0));
+  const [recharging, setRecharging] = useState(false);
+  const wallet = (Number(m.walletBalance?.value || 0) + topup).toFixed(2);
+
+  const rand = seededRandom(v.regRaw || plate || "GRIDPULSE");
+  const now = new Date();
+  const monthLabels = Array.from({ length: 12 }, (_, i) =>
+    new Date(now.getFullYear(), now.getMonth() - 11 + i, 1).toLocaleString("en-IN", { month: "short" })
+  );
+  const spends = useMemo(
+    () => monthLabels.map((lab) => ({ m: lab, v: Math.round((34 + rand() * 60) * 100) / 100 })),
+    []
+  );
+  const thisSpend = spends[spends.length - 1]?.v || 0;
+  const categories = [
+    { label: "Charging", v: +(thisSpend * 0.62).toFixed(2), color: C.cyan },
+    { label: "FASTag", v: +(thisSpend * 0.23).toFixed(2), color: C.green },
+    { label: "Maintenance", v: +(thisSpend * 0.15).toFixed(2), color: C.amber },
+  ];
+
+  const passbookRows = useMemo(() => {
+    const liveRows = (live?.transactions || []).map((t) => ({
+      id: `OCPP-${t.ocppTransactionId || t.id}`,
+      date: new Date(t.endTime).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+      location: `Live · ${t.station || "charger"}`,
+      amount: Number(t.cost || 0),
+      live: true,
+    }));
+    const seen = new Set();
+    return [...liveRows, ...fastagTransactions].filter((r) => {
+      if (!r.id) return true;
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    }).slice(0, 5);
+  }, [live, fastagTransactions]);
+
+  const doRecharge = () => {
+    if (recharging) return;
+    setRecharging(true);
+    setTimeout(() => {
+      const amt = preferences.currency === "INR" ? 500 : 5;
+      const next = topup + amt;
+      localStorage.setItem(`gp_fastag_topup_${regKey}`, String(next));
+      setTopup(next);
+      setRecharging(false);
+    }, 600);
+  };
+
+  const downloadDoc = (doc) => {
+    const body = [
+      "GRIDPULSE · My car",
+      `Vehicle: ${v.manufacturer || ""} ${v.model || ""}${plate !== "—" ? ` · ${plate}` : ""}`,
+      doc.name,
+      doc.no,
+      doc.meta,
+      "Carry this document alongside your mobile licence.",
+    ].join("\n");
+    const blob = new Blob([body], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${doc.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const docs = [
+    { icon: CreditCard, name: "Driving licence", no: "DL-07-2023-4X9A11", meta: "Valid till 17 Sep 2033", status: "Verified" },
+    { icon: FileText, name: "Registration (RC)", no: plate, meta: v.rtoCity ? `Registered at ${v.rtoCity} RTO` : "Electric · Green category", status: "Verified" },
+    { icon: ShieldCheck, name: "Insurance policy", no: ins.policyNo || "—", meta: ins.validTill || "—", status: ins.status === "Active" ? "Verified" : "Needs renewal" },
+    { icon: FileText, name: "PUC certificate", no: puc.certNo || "—", meta: puc.validTill || "—", status: puc.status === "Valid" ? "Verified" : "Needs renewal" },
+  ];
+
+  const dueSoon = (days) => days != null && days <= 60;
+
+  return (
+    <div className="g-page">
+      <div className="g-page-head">
+        <h2>My car · Garage</h2>
+        <p>Everything about your {v.manufacturer || ""} {v.model || "vehicle"} — value, ledgers, renewals and documents in one place.</p>
+      </div>
+
+      <div className="g-garage-hero">
+        <div className="g-garage-hero-icon"><Car size={18} /></div>
+        <div>
+          <div className="g-demo-label">{v.manufacturer || ""} {v.model || "My electric vehicle"}</div>
+          <div className="g-garage-hero-plate g-mono">{plate}</div>
+        </div>
+        <div className="g-garage-hero-meta">
+          <span><BadgeCheck size={13} style={{ color: C.green }} /> Green category</span>
+          <span>{v.purchaseYear}, {v.color}, {v.odometerKm} km</span>
+        </div>
+      </div>
+
+      <Card title="Know the vitals" icon={Gauge}>
+        <div className="g-garage-vitals">
+          <div className="g-garage-tile">
+            <span className="g-garage-tile-value">{v.marketValue ? money(v.marketValue) : "—"}</span>
+            <span className="g-garage-tile-label">Current market value</span>
+            <span className="g-garage-tile-sub">₹{v.exShowroom ? v.exShowroom.toLocaleString("en-IN") : "—"} ex-showroom · {v.retainedPct}% still holds</span>
+          </div>
+          <div className="g-garage-tile">
+            <span className="g-garage-tile-value">{v.estRangeKm ?? specs.range ?? "—"} km</span>
+            <span className="g-garage-tile-label">Est. range today</span>
+            <span className="g-garage-tile-sub">At {soc}% SoC · {specs.battery} battery</span>
+          </div>
+          <div className="g-garage-tile">
+            <span className="g-garage-tile-value">{v.capacityRetention ?? "—"}%</span>
+            <span className="g-garage-tile-label">Battery retained</span>
+            <span className="g-garage-tile-sub">{v.chargeCycles} cycles · {v.vehicleAge} yr old</span>
+          </div>
+          <div className="g-garage-tile">
+            <span className="g-garage-tile-value">{v.odometerKm ?? "—"} km</span>
+            <span className="g-garage-tile-label">Odometer</span>
+            <span className="g-garage-tile-sub">{v.purchaseYear} · {(v.odometerKm / (v.vehicleAge || 1)).toFixed(0)} km / yr</span>
+          </div>
+        </div>
+      </Card>
+
+      <div className="g-grid g-grid-2" style={{ marginTop: 16 }}>
+        <Card title="Car insurance · renewal" icon={ShieldCheck}>
+          <div className="g-list">
+            <div className="g-list-row">
+              <span>Insurer</span>
+              <span className="g-list-sub">{ins.insurer || "—"}</span>
+            </div>
+            <div className="g-list-row">
+              <span>Policy</span>
+              <span className="g-mono g-list-sub">{ins.policyNo || "—"}</span>
+            </div>
+            <div className="g-list-row">
+              <span>Valid till</span>
+              <span className="g-list-sub">
+                {ins.validTill || "—"}
+                {ins.daysLeft != null && <Badge status={ins.status === "Active" ? "healthy" : "warning"}>{ins.status === "Active" ? `${ins.daysLeft} days left` : "renew"}</Badge>}
+              </span>
+            </div>
+          </div>
+          <div className="g-insight" style={{ marginTop: 10 }}>
+            {dueSoon(ins.daysLeft) ? (
+              <>
+                <AlertTriangle size={14} style={{ color: C.amber, flexShrink: 0 }} />
+                <span>Renewing before it lapses keeps your no-claim bonus intact. Lapsed cover means a ₹1,500 reinstatement fee.</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={14} style={{ color: C.green, flexShrink: 0 }} />
+                <span>Policy is active for {ins.daysLeft ?? "—"} more days. Premium paid: {ins.premium != null ? money(ins.premium) : "—"}.</span>
+              </>
+            )}
+          </div>
+        </Card>
+        <Card title="PUC · pollution cert" icon={FileText}>
+          <div className="g-list">
+            <div className="g-list-row">
+              <span>Certificate</span>
+              <span className="g-mono g-list-sub">{puc.certNo || "—"}</span>
+            </div>
+            <div className="g-list-row">
+              <span>Valid till</span>
+              <span className="g-list-sub">
+                {puc.validTill || "—"}
+                {puc.daysLeft != null && <Badge status={puc.status === "Valid" ? "healthy" : "warning"}>{puc.status === "Valid" ? `${puc.daysLeft} days left` : puc.status}</Badge>}
+              </span>
+            </div>
+            <div className="g-list-row">
+              <span>Renewal fee</span>
+              <span className="g-list-sub">₹200 · fuel-agnostic CEV test</span>
+            </div>
+          </div>
+          <div className="g-insight" style={{ marginTop: 10 }}>
+            {dueSoon(puc.daysLeft) ? (
+              <>
+                <AlertTriangle size={14} style={{ color: C.amber, flexShrink: 0 }} />
+                <span>A 12-month overdue PUC means a ₹1,000 fine and your RC can be impounded — renew early.</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={14} style={{ color: C.green, flexShrink: 0 }} />
+                <span>PUC valid for {puc.daysLeft ?? "—"} more days — no penalty exposure right now.</span>
+              </>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="g-grid g-grid-2" style={{ marginTop: 16 }}>
+        <Card title="A ledger for your vehicle" icon={TrendingUp}>
+          <div className="g-garage-ledger-head">
+            <div>
+              <div className="g-garage-ledger-value">{formatMoneyText(m.monthSpend?.value || "0", preferences)}</div>
+              <div className="g-garage-tile-label">Spent in {monthLabels[monthLabels.length - 1]} · all charging & FASTag</div>
+            </div>
+            <div className="g-garage-cats">
+              {categories.map((c) => (
+                <div className="g-garage-cat" key={c.label}>
+                  <span className="g-dot" style={{ background: c.color }} />
+                  <span>{c.label}</span>
+                  <b>{formatMoneyText(String(c.v), preferences)}</b>
+                </div>
+              ))}
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={170}>
+            <BarChart data={spends} barCategoryGap="30%">
+              <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
+              <Bar dataKey="v" name="Month" radius={[4, 4, 0, 0]}>
+                {spends.map((s, i) => (
+                  <Cell key={i} fill={i === spends.length - 1 ? C.cyan : C.borderSolid} />
+                ))}
+              </Bar>
+              <XAxis dataKey="m" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+              <YAxis hide domain={[0, "dataMax + 10"]} />
+              <Tooltip
+                cursor={{ fill: "rgba(120,200,255,0.06)" }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  return (
+                    <div style={{ background: C.panelSolid, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: C.text, fontFamily: "var(--mono)" }}>
+                      <div style={{ color: C.textDim, marginBottom: 2 }}>{label}</div>
+                      <div style={{ color: C.cyan }}>{formatMoneyText(String(payload[0].value), preferences)}</div>
+                    </div>
+                  );
+                }}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card
+          title="FASTag passbook · stay in the fast lane"
+          icon={CreditCard}
+          action={<span className="g-mono" style={{ color: C.textDim, fontSize: 11 }}>{fastagId}</span>}
+        >
+          <div className="g-garage-wallet">
+            <div>
+              <div className="g-garage-ledger-value">{formatMoneyText(wallet, preferences)}</div>
+              <div className="g-garage-tile-label">Prepaid balance · updated today</div>
+            </div>
+            <button type="button" className="g-btn g-btn-ghost" onClick={doRecharge} disabled={recharging}>
+              <RefreshCw size={13} style={{ marginRight: 6 }} /> {recharging ? "Adding…" : `Recharge ${preferences.currency === "INR" ? "₹500" : "$5"}`}
+            </button>
+          </div>
+          <div className="g-list" style={{ marginTop: 10 }}>
+            {passbookRows.length === 0 && <div className="g-kpi-sub">No FASTag transactions yet — sessions auto-settle here as you unplug.</div>}
+            {passbookRows.map((t) => (
+              <div className="g-list-row" key={t.id}>
+                <div className="g-list-main">
+                  <CreditCard size={13} style={{ color: t.live ? C.green : C.textDimmer }} />
+                  <span>{t.location}</span>
+                </div>
+                <span className="g-list-sub">
+                  {t.date}
+                  {t.live && <span className="g-live-mini">LIVE</span>}
+                  <b style={{ color: C.text, marginLeft: 8 }}>{money(t.amount)}</b>
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <Card title="Glovebox · your documents" icon={FileText} style={{ marginTop: 16 }}>
+        <div className="g-garage-docs">
+          {docs.map((d) => (
+            <div className="g-doc" key={d.name}>
+              <span className="g-doc-icon"><d.icon size={16} /></span>
+              <div className="g-doc-info">
+                <div className="g-doc-title">{d.name}</div>
+                <div className="g-mono" style={{ color: C.textDim, fontSize: 12 }}>{d.no}</div>
+                <div className="g-doc-meta">{d.meta}</div>
+              </div>
+              <div className="g-doc-side">
+                <Badge status={d.status === "Verified" ? "healthy" : "warning"}>{d.status}</Badge>
+                <button type="button" className="g-btn g-btn-ghost g-doc-btn" onClick={() => downloadDoc(d)}>
+                  <Download size={12} style={{ marginRight: 5 }} /> Download
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="g-insight" style={{ marginTop: 14 }}>
+          <ShieldCheck size={14} style={{ color: C.green, flexShrink: 0 }} />
+          <span>These are accepted as valid documents by traffic police in digital form — keep this phone handy on the road.</span>
+        </div>
+      </Card>
+    </div>
   );
 }
 
@@ -2801,6 +3139,7 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
 
   const navItems = [
     { key: "overview", label: "Overview", icon: LayoutDashboard },
+    { key: "garage", label: "My car", icon: Car },
     { key: "planner", label: "Charge planner", icon: Timer },
     { key: "history", label: "Charging history", icon: History },
     { key: "battery", label: "Battery health", icon: Battery },
@@ -2877,7 +3216,12 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
 
   return (
     <div className="g-shell">
-      <Sidebar items={navItems} active={page} onSelect={setPage} />
+      <Sidebar
+        items={navItems}
+        active={page}
+        onSelect={setPage}
+        bottom={<SidebarCarPanel vehicleProfile={vehicleProfile} soc={vehicleProfile?.currentSoc} onNavigate={setPage} />}
+      />
       <main className="g-main">
         <div className="g-search-wrapper">
           <div className="g-search-bar">
@@ -2907,6 +3251,7 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
           )}
         </div>
         {page === "overview" && <DriverOverviewPage name={name} preferences={preferences} vehicleProfile={vehicleProfile} />}
+        {page === "garage" && <DriverGaragePage preferences={preferences} vehicleProfile={vehicleProfile} />}
         {page === "planner" && <DriverChargePlannerPage preferences={preferences} />}
         {page === "history" && <DriverHistoryPage preferences={preferences} />}
         {page === "battery" && <DriverBatteryPage vehicleProfile={vehicleProfile} />}
@@ -4982,6 +5327,28 @@ export default function GridPulseApp() {
         .g-sidebar-badge{margin-left:auto; font-size:10px; background:${C.red}; color:#25000a; padding:1px 7px; border-radius:20px; font-family:var(--mono); font-weight:600;}
         .g-main{flex:1; min-width:0;}
 
+        /* ---- sidebar car panel ---- */
+        .g-sidebar-car{
+          margin-top:22px; width:100%; display:block; text-align:left; padding:12px; border-radius:14px;
+          border:1px solid ${C.borderSoft}; background:linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.0));
+          color:${C.text}; cursor:pointer; transition:border-color .15s ease, background .15s ease;
+        }
+        .g-sidebar-car:hover{border-color:${C.cyanSoft}; background:rgba(255,255,255,0.035);}
+        .g-sidebar-car-top{display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color:${C.text};}
+        .g-sidebar-car-icon{
+          width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+          background:${C.cyanSoft}; color:${C.cyan}; flex-shrink:0;
+        }
+        .g-sidebar-car-name{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;}
+        .g-sidebar-car-plate{margin-top:8px; font-size:12.5px; color:${C.cyan}; font-weight:600; letter-spacing:0.06em;}
+        .g-sidebar-car-stats{margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+        .g-sidebar-car-stats>div{
+          display:flex; flex-direction:column; gap:1px; padding:7px 9px; border-radius:9px;
+          background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.03);
+        }
+        .g-sidebar-car-stats b{font-size:12.5px; color:${C.text}; font-family:var(--mono);}
+        .g-sidebar-car-stats span{font-size:9px; color:${C.textDimmer}; font-family:var(--mono); text-transform:uppercase; letter-spacing:0.05em;}
+
         /* ---- mobile menu ---- */
         .g-mobile-menu-toggle{
           display:none; position:fixed; top:16px; left:16px; z-index:1000;
@@ -5365,6 +5732,47 @@ export default function GridPulseApp() {
         .g-list-row-button{width:100%; border:0; background:none; color:inherit; text-align:left; font:inherit; cursor:pointer;}
         .g-list-row-button:hover{background:rgba(79,227,255,0.05);}
 
+        /* ---- garage / my car ---- */
+        .g-garage-hero{
+          display:flex; align-items:center; gap:14px; padding:16px 18px; border-radius:16px;
+          border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.02); margin-bottom:16px; flex-wrap:wrap;
+        }
+        .g-garage-hero-icon{
+          width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+          background:${C.cyanSoft}; color:${C.cyan}; flex-shrink:0;
+        }
+        .g-garage-hero-plate{font-size:19px; font-weight:700; color:${C.text}; letter-spacing:0.04em;}
+        .g-garage-hero-meta{margin-left:auto; display:flex; flex-direction:column; gap:4px; align-items:flex-end; font-size:11.5px; color:${C.textDim};}
+        .g-garage-hero-meta span{display:flex; align-items:center; gap:6px;}
+        .g-garage-vitals{display:grid; grid-template-columns:repeat(4, 1fr); gap:12px;}
+        .g-garage-tile{
+          display:flex; flex-direction:column; gap:4px; padding:14px 15px; border-radius:14px;
+          border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.025);
+        }
+        .g-garage-tile-value{font-size:20px; font-weight:700; color:${C.text}; font-family:var(--mono);}
+        .g-garage-tile-label{font-size:11px; color:${C.textDim};}
+        .g-garage-tile-sub{font-size:11px; color:${C.textDimmer}; font-family:var(--mono);}
+        .g-garage-ledger-head{display:flex; align-items:flex-end; justify-content:space-between; gap:14px; margin-bottom:6px; flex-wrap:wrap;}
+        .g-garage-ledger-value{font-size:24px; font-weight:700; color:${C.text}; font-family:var(--mono); line-height:1.1;}
+        .g-garage-cats{display:flex; gap:14px; flex-wrap:wrap;}
+        .g-garage-cat{display:flex; align-items:center; gap:6px; font-size:11.5px; color:${C.textDim};}
+        .g-garage-cat b{font-family:var(--mono); color:${C.text}; font-weight:600; margin-left:2px;}
+        .g-garage-wallet{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+        .g-garage-docs{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+        .g-doc{
+          display:flex; align-items:flex-start; gap:12px; padding:13px 14px; border-radius:14px;
+          border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.025);
+        }
+        .g-doc-icon{
+          width:34px; height:34px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+          background:${C.cyanSoft}; color:${C.cyan}; flex-shrink:0;
+        }
+        .g-doc-info{flex:1; min-width:0; display:flex; flex-direction:column; gap:3px;}
+        .g-doc-title{font-size:13px; font-weight:600; color:${C.text};}
+        .g-doc-meta{font-size:11px; color:${C.textDimmer};}
+        .g-doc-side{display:flex; flex-direction:column; align-items:flex-end; gap:8px;}
+        .g-doc-btn{padding:5px 9px; font-size:11.5px;}
+
         @media(max-width:860px){
           .g-shell{flex-direction:column; min-height:auto;}
           .g-main{padding-top:60px;}
@@ -5376,6 +5784,10 @@ export default function GridPulseApp() {
           .g-vehicle-fields .g-field-block:last-child{grid-column:auto;}
           .g-map-workspace{grid-template-columns:1fr;}
           .g-map-details{min-height:0;}
+          .g-garage-vitals{grid-template-columns:1fr 1fr;}
+          .g-garage-docs{grid-template-columns:1fr;}
+          .g-sidebar-car{display:none;}
+          .g-garage-hero-meta{align-items:flex-start; margin-left:0;}
         }
 
         /* ---- page ---- */
