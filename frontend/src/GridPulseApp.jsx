@@ -56,6 +56,35 @@ function Badge({ status, children }) {
   );
 }
 
+/* Cycles through a list of words with a soft fade/rise — used for the
+   animated hero headline (inspired by festival-site hero treatments). */
+function RotatingWord({ words, interval = 2800 }) {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setIndex((v) => (v + 1) % words.length), interval);
+    return () => clearInterval(t);
+  }, [words.length, interval]);
+  return <span className="g-window" key={index}>{words[index]}</span>;
+}
+
+/* Continuous scrolling text strip with a mask on either edge. */
+function Marquee({ items, className }) {
+  const row = items.map((t, i) => (
+    <span className="g-marquee-item" key={`${t}-${i}`}>
+      {t}
+      <span className="g-marquee-sep">◆</span>
+    </span>
+  ));
+  return (
+    <div className={`g-marquee ${className || ""}`}>
+      <div className="g-marquee-track">
+        <div className="g-marquee-half">{row}</div>
+        <div className="g-marquee-half" aria-hidden="true">{row}</div>
+      </div>
+    </div>
+  );
+}
+
 function formatCurrency(value, currency = "INR", region = "India") {
   const money = Number(value) || 0;
   const currencyMeta = {
@@ -357,7 +386,11 @@ function LoginScreen({ onLogin }) {
           <span>GRIDPULSE</span>
         </div>
         <h1 className="g-login-headline">
-          One login. Two very different views of the grid.
+          Charging, tuned to the{" "}
+          <span className="g-grad-text">
+            <RotatingWord words={["live grid", "clean energy", "demand signals", "the hour ahead"]} />
+          </span>
+          .
         </h1>
         <p className="g-login-sub">
           Drivers see their charging session and battery health.
@@ -368,6 +401,21 @@ function LoginScreen({ onLogin }) {
           {["Observe", "Detect", "Predict", "Optimize", "Act"].map((s, i, arr) => (
             <span key={s} className="g-loop-item">
               {s}{i < arr.length - 1 && <ChevronRight size={12} style={{ color: C.textDimmer }} />}
+            </span>
+          ))}
+        </div>
+        <div className="g-login-stack">
+          <span className="g-stack-label">RUNTIME</span>
+          {[
+            { m: "OCPP", s: "1.6 / 2.0.1" },
+            { m: "MODBUS", s: "TCP" },
+            { m: "OpenADR", s: "2.0b" },
+            { m: "ISO 15118", s: "Plug & Charge" },
+            { m: "VOLTTRON", s: "ingest" },
+            { m: "ANPR", s: "plate match" },
+          ].map((chip) => (
+            <span className="g-stack-chip" key={chip.m}>
+              <b>{chip.m}</b> {chip.s}
             </span>
           ))}
         </div>
@@ -488,6 +536,29 @@ function LoginScreen({ onLogin }) {
         <div className="g-login-foot">
           Demo build — any user ID &amp; password signs you in as this role.
         </div>
+      </div>
+
+      <Marquee
+        className="g-login-marquee"
+        items={[
+          "GRID-AWARE CHARGING",
+          "PLATE-MATCHED SESSIONS",
+          "DEMAND-RESPONSIVE PROGRAMMES",
+          "PLUG & CHARGE READY",
+          "PREDICTIVE MAINTENANCE",
+          "ENERGY THEFT DETECTION",
+          "PEAK FEE AVOIDANCE",
+        ]}
+      />
+
+      <div className="g-login-footer">
+        <div className="g-login-footer-brand">GRIDPULSE<span> · energy intelligence for EV fleets</span></div>
+        <a href="#login">GitHub</a>
+        <a href="#login">Docs</a>
+        <a href="#login">System status</a>
+        <a href="mailto:support@gridpulse.ai" className="g-push">support@gridpulse.ai</a>
+        <span>LinkedIn · X</span>
+        <span className="g-footer-copy">© 2026 GRIDPULSE · Vellore, India</span>
       </div>
     </div>
   );
@@ -2114,10 +2185,22 @@ function OwnerGatewayPage() {
 
   return (
     <div className="g-page">
-      <div className="g-page-head">
-        <h2>Live gateway</h2>
+      <div className="g-page-head g-page-display">
+        <span className="g-eyebrow">Protocol layer</span>
+        <h2>Live <span className="g-grad-text">gateway</span></h2>
         <p>Open-source protocol integrations wired into this demo — each one streams real data.</p>
       </div>
+      <Marquee
+        className="g-gateway-marquee"
+        items={[
+          "OCPP 1.6 / 2.0.1 CSMS",
+          "MODBUS/TCP · OpenModSim meters",
+          "OpenADR 2.0b · demand response",
+          "ISO 15118 · Josev Plug & Charge",
+          "Eclipse VOLTTRON ingest",
+          "ANPR plate matches",
+        ]}
+      />
       <div className="g-grid" style={{ gridTemplateColumns: "1fr", marginBottom: 18 }}>
         <div className="g-live-integrations">
           <div className="g-live-integrations-head">
@@ -3802,6 +3885,57 @@ export default function GridPulseApp() {
         .g-login-sub{color:${C.textDim}; font-size:14.5px; line-height:1.6; max-width:420px;}
         .g-login-loop{display:flex; flex-wrap:wrap; gap:6px; margin-top:28px; font-family:var(--mono); font-size:11px; color:${C.textDimmer};}
         .g-loop-item{display:flex; align-items:center; gap:6px;}
+
+        /* ---- gravitas-inspired polish (professional) ---- */
+        .g-grad-text{
+          background:linear-gradient(100deg, ${C.cyan} 0%, #9df1ff 45%, ${C.amber} 100%);
+          -webkit-background-clip:text; background-clip:text; color:transparent;
+        }
+        .g-window{display:inline-block; animation:g-wind .55s cubic-bezier(.22,1,.36,1);}
+        @keyframes g-wind{from{opacity:0; transform:translateY(10px); filter:blur(4px);} to{opacity:1; transform:translateY(0); filter:blur(0);}}
+        .g-login-stack{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:24px;}
+        .g-stack-label{font-family:var(--mono); font-size:9.5px; letter-spacing:.16em; color:${C.textDimmer}; margin-right:4px;}
+        .g-stack-chip{
+          font-family:var(--mono); font-size:10px; letter-spacing:.04em; color:${C.textDim};
+          border:1px solid ${C.border}; background:rgba(255,255,255,0.02); padding:5px 11px; border-radius:20px;
+        }
+        .g-stack-chip b{color:${C.cyan}; font-weight:600;}
+        .g-login-marquee{margin-top:28px; flex:1 1 100%;}
+        .g-login-footer{
+          flex:1 1 100%; margin-top:8px; padding-top:18px; border-top:1px solid ${C.borderSoft};
+          display:flex; flex-wrap:wrap; gap:8px 22px; align-items:center;
+          font-size:11px; color:${C.textDimmer}; font-family:var(--mono);
+        }
+        .g-login-footer-brand{color:${C.text}; font-family:var(--display); font-weight:600; letter-spacing:-0.01em;}
+        .g-login-footer-brand span{color:${C.textDimmer}; font-weight:400; font-family:var(--mono); font-size:10.5px;}
+        .g-login-footer a{color:${C.textDim}; text-decoration:none; transition:color .15s ease;}
+        .g-login-footer a:hover{color:${C.cyan};}
+        .g-login-footer .g-push{margin-left:auto;}
+        .g-footer-copy{color:#3f5360;}
+
+        .g-marquee{
+          overflow:hidden; position:relative; width:100%; padding:11px 0;
+          border-top:1px solid ${C.borderSoft}; border-bottom:1px solid ${C.borderSoft};
+          background:rgba(255,255,255,0.015);
+          -webkit-mask-image:linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+          mask-image:linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+        }
+        .g-marquee-track{display:flex; width:max-content; animation:g-scroll 36s linear infinite;}
+        .g-marquee:hover .g-marquee-track{animation-play-state:paused;}
+        .g-marquee-half{display:flex; align-items:center;}
+        .g-marquee-item{
+          display:flex; align-items:center; gap:16px; padding:0 16px; white-space:nowrap;
+          font-family:var(--mono); font-size:11px; letter-spacing:.08em; color:${C.textDimmer};
+        }
+        .g-marquee-sep{color:${C.cyan}; font-size:7px; opacity:.7;}
+        @keyframes g-scroll{to{transform:translateX(-50%);}}
+        .g-gateway-marquee{margin:4px 0 20px;}
+        .g-page-display h2{font-family:var(--display); font-weight:700; font-size:clamp(26px,3.2vw,36px); letter-spacing:-0.02em; line-height:1.05;}
+        .g-eyebrow{
+          display:inline-flex; align-items:center; gap:8px; margin-bottom:10px;
+          font-family:var(--mono); font-size:10.5px; letter-spacing:.16em; color:${C.cyan}; text-transform:uppercase;
+        }
+        .g-eyebrow::before{content:''; width:22px; height:1px; background:${C.cyan}; opacity:.5;}
 
         .g-login-card{
           flex:1 1 360px; max-width:420px; background:${C.panel}; border:1px solid ${C.border};

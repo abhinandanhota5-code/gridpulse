@@ -67,9 +67,13 @@ async function poll(reg) {
 
 async function main() {
   console.log(`OpenADR VEN ${VEN_ID} -> ${BASE}`);
-  const reg = await register();
-  await poll(reg);
-  setInterval(() => poll(reg), POLL_MS);
+  const runPoll = (reg) => poll(reg).catch((err) => console.error(`[ven] poll error (will retry): ${err.message}`));
+  const reg = await register().catch((err) => {
+    console.error(`[ven] registration failed: ${err.message}`);
+    return null;
+  });
+  await runPoll(reg);
+  setInterval(() => runPoll(reg), POLL_MS);
 }
 
 main().catch((err) => { console.error("[ven] failed:", err.message); process.exit(1); });
