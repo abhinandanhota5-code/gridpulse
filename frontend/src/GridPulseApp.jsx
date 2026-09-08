@@ -2581,6 +2581,47 @@ function DriverChargersPage({ preferences }) {
     return [...effective].sort((a, b) => (effKm(a) ?? Infinity) - (effKm(b) ?? Infinity));
   }, [effective, geo.loc, routes]);
 
+  // Location search: browse chargers anywhere in India by city or state.
+  const locSearch = useMemo(() => {
+    const q = (searchQuery || "").trim().toLowerCase();
+    if (!q) return { results: [], active: false, label: "" };
+    const cityMatches = (c) =>
+      c.city?.toLowerCase().includes(q) || c.state?.toLowerCase().includes(q);
+    const results = nationalChargers.filter(cityMatches);
+    let label = "";
+    if (results.length) {
+      const city = results[0].city;
+      const st = results[0].state;
+      label = `${results.length} station${results.length === 1 ? "" : "s"} in ${city}, ${st}`;
+    }
+    return { results, active: results.length > 0, label };
+  }, [searchQuery, nationalChargers]);
+
+  // Focus the map on the searched city's centroid.
+  useEffect(() => {
+    if (!locSearch.active || !locSearch.results.length) {
+      setSearchFocus(null);
+      return;
+    }
+    const first = locSearch.results[0];
+    const cityMeta = IN_CITIES[first.city] || IN_CITIES[first.state];
+    setSearchFocus({
+      center: cityMeta ? { lat: cityMeta.lat, lng: cityMeta.lng } : { lat: first.lat, lng: first.lng },
+      zoom: 11,
+    });
+  }, [locSearch.active, locSearch.results]);
+
+  const locationResults = locSearch.active ? locSearch.results : [];
+
+  // Build a combined dataset for list/map: local chargers plus any location-search hits.
+  const displayChargers = useMemo(() => {
+    if (!locSearch.active) return effective;
+    const ids = new Set(locationResults.map((c) => c.id));
+    const merged = [...effective.filter((c) => !ids.has(c.id))];
+    locationResults.forEach((c) => merged.push(c));
+    return merged;
+  }, [effective, locSearch.active, locationResults]);
+
   const filteredChargers = (locSearch.active ? displayChargers : ordered)
     .filter((charger) => filterStatus === "all" || charger.status === filterStatus)
     .filter((charger) => proximity === "any" || (effKm(charger) != null && effKm(charger) <= Number(proximity)));
@@ -2608,55 +2649,6 @@ function DriverChargersPage({ preferences }) {
   }, [nearbyChargers, selectedCharger]);
 
   // What to show for a charger's distance: road → straight-line → static.
-  // Location search: browse chargers anywhere in India by city or state.
-  const locSearch = useMemo(() => {
-    const q = (searchQuery || "").trim().toLowerCase();
-    if (!q) return { results: [], active: false, label: "" };
-    const byCity = new Map();
-    nationalChargers.forEach((c) => {
-      if (!byCity.has(c.city)) byCity.set(c.city, []);
-      byCity.get(c.city).push(c);
-    });
-    const cityMatches = (c) =>
-      c.city?.toLowerCase().includes(q) || c.state?.toLowerCase().includes(q);
-    // Set focus to the first matching city's centroid for the map.
-    const results = nationalChargers.filter(cityMatches);
-    let label = "";
-    if (results.length) {
-      const city = results[0].city;
-      const st = results[0].state;
-      const inCity = IN_CITIES[city] || IN_CITIES[st];
-      label = `${results.length} station${results.length === 1 ? "" : "s"} in ${city}, ${st}`;
-    }
-    return { results, active: results.length > 0, label };
-  }, [searchQuery, nationalChargers]);
-
-  // City → depends on each charger's coords being inside the city box.
-  useEffect(() => {
-    if (!locSearch.active || !locSearch.results.length) {
-      setSearchFocus(null);
-      return;
-    }
-    const first = locSearch.results[0];
-    const cityMeta = IN_CITIES[first.city] || IN_CITIES[first.state];
-    setSearchFocus({
-      center: cityMeta ? { lat: cityMeta.lat, lng: cityMeta.lng } : { lat: first.lat, lng: first.lng },
-      zoom: 11,
-    });
-  }, [locSearch.active, locSearch.results]);
-
-  const locationResults = locSearch.active ? locSearch.results : [];
-
-  // Build a combined dataset for list/map: local chargers plus any search hits.
-  const displayChargers = useMemo(() => {
-    if (!locSearch.active) return effective;
-    const ids = new Set(locationResults.map((c) => c.id));
-    // Merge matching national chargers in, excluding any local dup by name.
-    const merged = [...effective.filter((c) => !ids.has(c.id))];
-    locationResults.forEach((c) => merged.push(c));
-    return merged;
-  }, [effective, locSearch.active, locationResults]);
-
   const distMeta = (c) => {
     const r = routes[c.name];
     if (r) return { label: formatKm(r.km), mins: r.minutes, note: "road" };
