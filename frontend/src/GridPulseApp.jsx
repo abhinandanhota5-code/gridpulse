@@ -1989,6 +1989,178 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
 /* ---------------------------------------------------------------- */
 /*  Owner — page bodies                                              */
 /* ---------------------------------------------------------------- */
+function OwnerGatewayPage() {
+  const { live, liveConnected } = useLiveData();
+
+  const src = (key) => live?.sources?.[key] || { status: "standby", detail: "Waiting for connection", count: 0, name: key };
+
+  const statusColor = (s) =>
+    s.status === "connected" || s.status === "active" ? C.green :
+    s.status === "connecting" ? C.amber :
+    s.status === "offline" ? C.red : C.textDimmer;
+
+  const runHint = {
+    ocpp: "node scripts/ocpp-sim.js — or ocpp-ws-simulator → ws://<host>/ocpp/{stationId}",
+    modbus: "Run OpenModSim on :1502 — or node scripts/modbus-sim.js (drives /api/modbus/sim)",
+    openadr: "node scripts/ven-node.js — or any python-openleadr VEN → /openadr/ei/event",
+    josev: "node scripts/ingest-bridges.js — POSTs /api/ingest/josev V2G events",
+    volttron: "node scripts/ingest-bridges.js — POSTs /api/ingest/volttron site metrics",
+    anpr: "node scripts/anpr-sim.js — or leave ANPR_DEMO on (built-in streamer)",
+  };
+
+  const order = ["ocpp", "modbus", "openadr", "josev", "volttron", "anpr"];
+  const ICONS = { ocpp: Plug, modbus: Gauge, openadr: Radio, josev: Zap, volttron: Building2, anpr: Eye };
+
+  function Feed({ snap, sourceKey }) {
+    if (!liveConnected) return <p className="g-kpi-sub">Reconnecting to the protocol gateway…</p>;
+    return (
+      <div className="g-gw-feed">
+        {renderFeed(snap, sourceKey)}
+      </div>
+    );
+  }
+
+  function renderFeed(snap, sourceKey) {
+    if (!snap) return null;
+    switch (sourceKey) {
+      case "ocpp": {
+        const stations = snap.stations || [];
+        if (!stations.length) return <p className="g-kpi-sub">No OCPP charge points connected yet.</p>;
+        return stations.map((st) => {
+          const c = st.connectors?.[0] || {};
+          return (
+            <div className="g-gw-row" key={st.identity}>
+              <span className="g-dot" style={{ background: st.status === "online" ? C.green : C.textDimmer, boxShadow: `0 0 8px ${st.status === "online" ? C.green : C.textDimmer}99` }} />
+              <span className="g-mono" style={{ color: st.status === "online" ? C.text : C.textDim }}>{st.identity}</span>
+              <span style={{ color: C.textDimmer, fontSize: 11 }} className="g-mono">{st.protocol}</span>
+              <span className="g-gw-val">
+                {c.status} · {c.soC ?? "—"}% SoC · {c.powerKw ?? 0} kW · {c.meterKwh ?? 0} kWh
+              </span>
+            </div>
+          );
+        });
+      }
+      case "modbus": {
+        const regs = live.modbus?.registers || {};
+        const vals = Object.values(regs).slice(0, 8);
+        if (!vals.length) return <p className="g-kpi-sub">{live?.modbus?.error ? `OpenModSim unreachable — ${live.modbus.error}` : "No registers read yet."}</p>;
+        return vals.map((r) => (
+          <div className="g-gw-row" key={r.addr}>
+            <span className="g-gw-label">{r.label}</span>
+            <span style={{ color: C.textDimmer, fontSize: 11 }} className="g-mono">reg {r.addr}</span>
+            <span className="g-gw-val g-mono">{r.value} {r.unit}</span>
+          </div>
+        ));
+      }
+      case "openadr": {
+        const events = (snap.drEvents || []).filter((e) => !e.cancelled && new Date(e.endAt) > Date.now());
+        if (!events.length) return <p className="g-kpi-sub">No active demand-response events.</p>;
+        return events.map((e) => (
+          <div className="g-gw-row" key={e.id}>
+            <Badge status={e.status === "active" ? "healthy" : "resting"}>{e.status}</Badge>
+            <span className="g-gw-label">{e.title}</span>
+            <span className="g-gw-val g-mono">{e.signalPercent}% · {e.incentive}</span>
+          </div>
+        ));
+      }
+      case "josev": {
+        const v2g = (snap.v2g || []).slice(0, 5);
+        if (!v2g.length) return <p className="g-kpi-sub">No ISO 15118 events bridged yet.</p>;
+        return v2g.map((ev, i) => (
+          <div className="g-gw-row" key={`${ev.station}-${i}`}>
+            <span className="g-gw-label">{ev.event}</span>
+            <span style={{ color: C.textDimmer, fontSize: 11 }} className="g-mono">{ev.station}</span>
+            <span className="g-gw-val g-mono">{ev.powerKw} kW · {ev.energyKwh} kWh</span>
+            {ev.details && <span className="g-gw-sub" style={{ gridColumn: "1 / -1" }}>{ev.details}</span>}
+          </div>
+        ));
+      }
+      case "volttron": {
+        const sites = snap.volttron || [];
+        if (!sites.length) return <p className="g-kpi-sub">No VOLTTRON sites sending metrics yet.</p>;
+        return sites.map((site) => {
+          const m = site.latest || {};
+          return (
+            <div className="g-gw-row" key={site.site}>
+              <span className="g-gw-label">{site.site}</span>
+              <span className="g-gw-val g-mono">{m.pv_kw ?? "—"} kW PV · {m.grid_kw ?? "—"} kW grid · {m.evse_load_kw ?? "—"} kW EVSE</span>
+            </div>
+          );
+        });
+      }
+      case "anpr": {
+        const a = snap.anpr || {};
+        return (
+          <>
+            <div className="g-anpr-counters">
+              <span className="g-anpr-counter"><strong>{a.detections || 0}</strong> detections</span>
+              <span className="g-anpr-counter"><strong>{a.matches || 0}</strong> matched</span>
+              <span className="g-anpr-counter"><strong>{a.cameras?.length || 0}</strong> cameras</span>
+            </div>
+            {(a.events || []).slice(0, 5).map((ev, i) => (
+              <div className="g-gw-row" key={`${ev.id}-${i}`}>
+                <span className="g-mono" style={{ color: C.text }}>{ev.plate}</span>
+                <span style={{ color: C.textDimmer, fontSize: 11 }} className="g-mono">{ev.cameraId}</span>
+                <span className="g-gw-val">{Math.round(ev.confidence * 100)}% {ev.matched ? "· matched" : ""}</span>
+              </div>
+            ))}
+          </>
+        );
+      }
+      default:
+        return null;
+    }
+  }
+
+  return (
+    <div className="g-page">
+      <div className="g-page-head">
+        <h2>Live gateway</h2>
+        <p>Open-source protocol integrations wired into this demo — each one streams real data.</p>
+      </div>
+      <div className="g-grid" style={{ gridTemplateColumns: "1fr", marginBottom: 18 }}>
+        <div className="g-live-integrations">
+          <div className="g-live-integrations-head">
+            <div>
+              <span className="g-live-integrations-title"><Radio size={12} style={{ color: C.cyan }} /> Protocol gateway</span>
+              <p className="g-kpi-sub" style={{ margin: "4px 0 0" }}>
+                Endpoint: <span className="g-mono">{API_BASE_URL}</span> · SSE stream + OCPP WebSocket on the same host.
+              </p>
+            </div>
+            <span className={`g-live-pill ${liveConnected ? "g-live-pill-on" : ""}`}>
+              <span className="g-live-pill-dot" /> {liveConnected ? "Live" : "Offline"}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="g-grid g-grid-2">
+        {order.map((key) => {
+          const s = src(key);
+          const Icon = ICONS[key];
+          return (
+            <Card key={key} title={`${s.name}`} icon={Icon}>
+              <div className="g-gw-card-head">
+                <span className="g-gw-project g-mono">{s.project || "—"}</span>
+                <span className="g-gw-status">
+                  <span className="g-dot" style={{ background: statusColor(s), boxShadow: `0 0 8px ${statusColor(s)}99` }} />
+                  {s.status}
+                </span>
+              </div>
+              <p className="g-kpi-sub" style={{ margin: "8px 0 10px" }}>{s.protocol}</p>
+              <div className="g-gw-card-meta">
+                <span className="g-kpi-sub">{s.detail}</span>
+                {s.count > 0 && <span className="g-gw-count g-mono">{s.count}</span>}
+              </div>
+              <Feed snap={live} sourceKey={key} />
+              <p className="g-gw-hint g-mono">{runHint[key]}</p>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function OwnerOverviewPage({ preferences }) {
   const {
     anomalies, currentWeather, theftFlags, energyTrend, gridLoad,
@@ -2929,7 +3101,7 @@ function OwnerPredictiveInsightsPage({ onNavigate }) {
   );
 }
 
-function ProductCard({ icon: Icon, title, tagline, points, badge, onConfigure }) {
+function ProductCard({ icon: Icon, title, tagline, points, badge, onConfigure, liveStatus }) {
   return (
     <Card title={title} icon={Icon}>
       <div className="g-product-card">
@@ -2938,6 +3110,12 @@ function ProductCard({ icon: Icon, title, tagline, points, badge, onConfigure })
             color: C.cyan, borderColor: `${C.cyan}55`, background: C.cyanSoft,
             alignSelf: "flex-start", marginBottom: 12,
           }}>{badge}</span>
+        )}
+        {liveStatus && (
+          <div className="g-products-live">
+            <span className="g-dot" style={{ background: liveStatus.color, boxShadow: `0 0 8px ${liveStatus.color}99` }} />
+            <span className="g-mono" style={{ fontSize: 10.5, color: liveStatus.color }}>{liveStatus.text}</span>
+          </div>
         )}
         <p className="g-kpi-sub" style={{ marginBottom: 14, fontSize: 12.5, lineHeight: 1.55 }}>{tagline}</p>
         <div className="g-list">
@@ -2961,6 +3139,17 @@ function ProductCard({ icon: Icon, title, tagline, points, badge, onConfigure })
 }
 
 function OwnerProductsPage({ goToSettings }) {
+  const { live, liveConnected } = useLiveData();
+
+  const liveStatus = (key) => {
+    const s = live?.sources?.[key];
+    if (!s) return null;
+    const color = s.status === "connected" || s.status === "active" ? C.green :
+                  s.status === "connecting" ? C.amber :
+                  s.status === "offline" ? C.red : C.textDimmer;
+    return { color, text: `${s.status === "connected" || s.status === "active" ? "LIVE" : s.status.toUpperCase()} · ${s.detail || "waiting"}` };
+  };
+
   return (
     <div className="g-page">
       <div className="g-page-head">
@@ -2975,6 +3164,7 @@ function OwnerProductsPage({ goToSettings }) {
           badge="Core"
           tagline="Open Charge Point Protocol links every charger on the network to GRIDPULSE over secure WebSockets."
           points={["OCPP 1.6J & 2.0.1 support", "Remote start/stop and firmware push", "Smart charging profiles & load balancing"]}
+          liveStatus={liveStatus("ocpp")}
           onConfigure={goToSettings}
         />
         <ProductCard
@@ -2983,6 +3173,7 @@ function OwnerProductsPage({ goToSettings }) {
           badge="Beta"
           tagline="Automatic Number Plate Recognition reads the plate as a vehicle pulls into the bay and matches it to its charging session."
           points={["Tap-free session start & billing", "Unregistered/unmatched plate alerts", "Feeds the energy-theft cross-check engine"]}
+          liveStatus={liveStatus("anpr")}
           onConfigure={goToSettings}
         />
         <ProductCard
@@ -3011,6 +3202,50 @@ function OwnerProductsPage({ goToSettings }) {
           title="End-to-end services"
           tagline="Site survey, installation, and ongoing maintenance for hardware deployed on the network."
           points={["Charger install & commissioning", "Scheduled + predictive maintenance", "24/7 network operations support"]}
+        />
+      </div>
+
+      <div className="g-page-subhead" style={{ marginTop: 26 }}>
+        <h3>Protocol integrations</h3>
+        <p>Open-source components wired into the live gateway — statuses reflect the running demo.</p>
+      </div>
+
+      <div className="g-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginTop: 16 }}>
+        <ProductCard
+          icon={Gauge}
+          title="Open ModSim · MODBUS/TCP"
+          badge="Open source"
+          tagline="MODBUS/TCP substation simulator that GRIDPULSE's meter master polls on port 1502."
+          points={["Polls grid load, solar PV, battery SoC & EVSE draw registers", "Register values stream into Grid & energy in real time", "Register writes (via /api/modbus/sim) for engineering demos"]}
+          liveStatus={liveStatus("modbus")}
+          onConfigure={goToSettings}
+        />
+        <ProductCard
+          icon={Building2}
+          title="Eclipse VOLTTRON"
+          badge="Open source"
+          tagline="PNNL edge platform collecting site telemetry and forwarding it to the gateway."
+          points={["Site PV / grid / EVSE metrics pushed via /api/ingest/volttron", "Edge agents keep logging when the uplink drops", "Metrics feed Grid & energy and the predictive model"]}
+          liveStatus={liveStatus("volttron")}
+          onConfigure={goToSettings}
+        />
+        <ProductCard
+          icon={Zap}
+          title="Josev · ISO 15118 Plug & Charge"
+          badge="Open source"
+          tagline="EcoG's open ISO 15118 stack brings Plug & Charge to the charging socket."
+          points={["SessionMatched Plug & Charge auth on plug-in", "V2G session negotiation at setpoint power", "CableCheck / TLS handshake events bridged via /api/ingest/josev"]}
+          liveStatus={liveStatus("josev")}
+          onConfigure={goToSettings}
+        />
+        <ProductCard
+          icon={Radio}
+          title="OpenADR 2.0b Virtual Top Node"
+          badge="Open source"
+          tagline="Native OpenADR 2.0b VTN the network uses to run demand-response events."
+          points={["EiRegisterParty / EiEvent / EiOpt XML endpoints", "DR events seeded with signal % and incentive", "VENs opt in/out live — opt-outs are honored"]}
+          liveStatus={liveStatus("openadr")}
+          onConfigure={goToSettings}
         />
       </div>
     </div>
@@ -3353,6 +3588,7 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
 
   const navItems = [
     { key: "overview", label: "Overview", icon: LayoutDashboard },
+    { key: "gateway", label: "Live gateway", icon: Radio },
     { key: "charging", label: "Charging operations", icon: Activity },
     { key: "grid", label: "Grid & energy", icon: Gauge },
     { key: "battery", label: "Battery insights", icon: Battery },
@@ -3442,6 +3678,7 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
           )}
         </div>
         {page === "overview" && <OwnerOverviewPage preferences={preferences} />}
+        {page === "gateway" && <OwnerGatewayPage />}
         {page === "charging" && (
           <OwnerChargingPage
             ocppStatus={ocppStatus}
@@ -4184,6 +4421,32 @@ export default function GridPulseApp() {
         .g-confidence-block{display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;}
         .g-confidence-score{display:flex; flex-direction:column; gap:2px;}
         .g-confidence-actions{display:flex; gap:8px; flex-wrap:wrap;}
+
+        /* ---- live gateway page ---- */
+        .g-gw-card-head{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+        .g-gw-project{font-size:10.5px; color:${C.cyan}; background:${C.cyanSoft}; border:1px solid rgba(79,227,255,0.25); padding:3px 8px; border-radius:12px;}
+        .g-gw-status{display:flex; align-items:center; gap:6px; font-size:11px; font-family:var(--mono); color:${C.textDim};}
+        .g-gw-card-meta{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;}
+        .g-gw-count{font-size:12px; color:${C.cyan};}
+        .g-gw-feed{display:flex; flex-direction:column; gap:7px; margin:4px 0 10px;}
+        .g-gw-row{
+          display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px;
+          background:rgba(79,227,255,0.04); border:1px solid ${C.borderSoft}; flex-wrap:wrap;
+        }
+        .g-gw-label{font-size:12px; color:${C.text}; flex:1; min-width:0;}
+        .g-gw-val{font-size:11.5px; color:${C.textDim}; font-family:var(--mono);}
+        .g-gw-sub{font-size:11px; color:${C.textDimmer}; line-height:1.4;}
+        .g-gw-hint{font-size:10.5px; color:${C.textDimmer}; margin:2px 0 0; border-top:1px dashed ${C.borderSoft}; padding-top:8px;}
+
+        /* ---- products page ---- */
+        .g-page-subhead h3{font-size:13.5px; color:${C.text}; font-family:var(--display); font-weight:600;}
+        .g-page-subhead p{font-size:12px; color:${C.textDim}; margin:4px 0 0;}
+        .g-products-live{
+          display:inline-flex; align-items:center; gap:8px; margin-bottom:12px;
+          padding:5px 10px; border-radius:12px; border:1px solid ${C.borderSoft};
+          background:rgba(255,255,255,0.02); max-width:100%;
+        }
+        .g-products-live .g-mono{color:${C.textDim}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
       `}</style>
 
       {!session ? (

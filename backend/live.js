@@ -10,12 +10,12 @@ const RATE_PER_KWH = 0.16; // $/kWh used to estimate live session cost
 const MAX_METER_POINTS = 60;
 
 const SOURCE_META = {
-  ocpp:     { name: "OCPP 1.6 / 2.0.1", protocol: "ocpp-ws-io · WebSocket CSMS" },
-  modbus:   { name: "MODBUS", protocol: "MODBUS/TCP · OpenModSim" },
-  openadr:  { name: "OpenADR 2.0b", protocol: "VTN · EiEvent / EiOpt" },
-  josev:    { name: "ISO 15118 · Plug & Charge", protocol: "Josev V2G bridge" },
-  volttron: { name: "Eclipse VOLTTRON", protocol: "Edge gateway ingest" },
-  anpr:     { name: "ANPR cameras", protocol: "plate-events ingest · REST" },
+  ocpp:     { name: "OCPP 1.6 / 2.0.1", project: "ocpp-ws-io", protocol: "WebSocket CSMS · boot / txn / meter values" },
+  modbus:   { name: "MODBUS/TCP", project: "OpenModSim", protocol: "Master polls slave registers on :1502" },
+  openadr:  { name: "OpenADR 2.0b", project: "GRIDPULSE VTN", protocol: "EiRegisterParty · EiEvent · EiOpt" },
+  josev:    { name: "ISO 15118 · Plug & Charge", project: "Josev (EcoG)", protocol: "V2G charger bridge ingest" },
+  volttron: { name: "Edge gateways", project: "Eclipse VOLTTRON", protocol: "Site metrics ingest" },
+  anpr:     { name: "ANPR cameras", project: "Plate-events API", protocol: "REST ingest · plate↔session match" },
 };
 
 class LiveHub extends EventEmitter {
