@@ -1233,7 +1233,7 @@ function DriverChargersPage({ preferences }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [proximity, setProximity] = useState("any");
 
-  // Attach a GPS-derived distance when we have a live fix.
+  // Attach a GPS-derived (straight-line) distance when we have a live fix.
   const withDist = useMemo(
     () =>
       nearbyChargers.map((c) => ({
@@ -1243,17 +1243,58 @@ function DriverChargersPage({ preferences }) {
     [nearbyChargers, geo.loc]
   );
 
+  // Road distances + drive times from the OSRM public routing service.
+  // Falls back to straight-line automatically when offline/slow.
+  const [routes, setRoutes] = useState({});
+  const [routeState, setRouteState] = useState("idle"); // idle | loading | ready | offline
+  useEffect(() => {
+    if (geo.state !== "granted" || !geo.loc || !nearbyChargers.length) {
+      setRoutes({});
+      setRouteState("idle");
+      return;
+    }
+    let cancelled = false;
+    setRouteState("loading");
+    const origin = `${geo.loc.lng},${geo.loc.lat}`;
+    Promise.allSettled(
+      nearbyChargers.map(async (c) => {
+        const url = `https://router.project-osrm.org/route/v1/driving/${origin};${c.lng},${c.lat}?overview=false&alternatives=false&steps=false`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
+        const j = await res.json();
+        const r = j && j.routes && j.routes[0];
+        if (!r) throw new Error("no route");
+        return { name: c.name, km: r.distance / 1000, minutes: Math.round(r.duration / 60) };
+      })
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const map = {};
+        results.forEach((r) => {
+          if (r.status === "fulfilled") map[r.value.name] = { km: r.value.km, minutes: r.value.minutes };
+        });
+        setRoutes(map);
+        setRouteState(Object.keys(map).length ? "ready" : "offline");
+      })
+      .catch(() => { if (!cancelled) setRouteState("offline"); });
+    return () => { cancelled = true; };
+  }, [geo.state, geo.loc, nearbyChargers]);
+
+  // Effective figures: road when routing is ready, else straight-line.
+  const effKm = (c) => routes[c.name]?.km ?? c.km;
+  const effMins = (c) =>
+    routes[c.name]?.minutes ?? (c.km != null ? Math.max(1, Math.round((c.km / 35) * 60)) : null);
+
   // Nearest-first ordering only once a fix exists; otherwise keep backend order.
   const ordered = useMemo(() => {
     if (!geo.loc) return withDist;
-    return [...withDist].sort((a, b) => (a.km ?? Infinity) - (b.km ?? Infinity));
-  }, [withDist, geo.loc]);
+    return [...withDist].sort((a, b) => (effKm(a) ?? Infinity) - (effKm(b) ?? Infinity));
+  }, [withDist, geo.loc, routes]);
 
   const filteredChargers = ordered
     .filter((charger) => filterStatus === "all" || charger.status === filterStatus)
-    .filter((charger) => proximity === "any" || (charger.km != null && charger.km <= Number(proximity)));
+    .filter((charger) => proximity === "any" || (effKm(charger) != null && effKm(charger) <= Number(proximity)));
 
-  const nearest = geo.loc ? [...ordered].filter((c) => c.km != null)[0] : null;
+  const nearest = geo.loc ? [...ordered].filter((c) => effKm(c) != null)[0] : null;
 
   const mapData = nearbyChargers.map((charger, index) => {
     const coords = [
@@ -1265,7 +1306,7 @@ function DriverChargersPage({ preferences }) {
       { x: 72, y: 52 },
     ];
     const point = coords[index % coords.length];
-    const km = withDist[index]?.km ?? null;
+    const km = effKm(charger);
     return {
       ...charger,
       x: point.x,
@@ -1283,22 +1324,36 @@ function DriverChargersPage({ preferences }) {
     }
   }, [nearbyChargers, selectedCharger]);
 
-  const distanceLabel = (c) => (geo.loc && c.km != null ? formatKm(c.km) : c.distance);
-
-  const openInMaps = (c) => {
-    if (geo.loc) {
-      window.open(
-        `https://www.google.com/maps/dir/?api=1&origin=${geo.loc.lat},${geo.loc.lng}&destination=${c.lat},${c.lng}`,
-        "_blank",
-        "noopener,noreferrer"
-      );
-    } else {
-      const query = encodeURIComponent(`${c.name}, India`);
-      window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, "_blank", "noopener,noreferrer");
-    }
+  // What to show for a charger's distance: road → straight-line → static.
+  const distMeta = (c) => {
+    const r = routes[c.name];
+    if (r) return { label: formatKm(r.km), mins: r.minutes, note: "road" };
+    if (geo.loc && c.km != null) return { label: formatKm(c.km), mins: effMins(c), note: "straight-line" };
+    return { label: c.distance, mins: null, note: null };
   };
 
-  const estDriveMins = (c) => (c.km != null ? Math.max(1, Math.round((c.km / 35) * 60)) : null);
+  const openInMaps = (c, app = "google") => {
+    const dest = `${c.lat},${c.lng}`;
+    const origin = geo.loc ? `${geo.loc.lat},${geo.loc.lng}` : null;
+    const url =
+      app === "apple"
+        ? `http://maps.apple.com/?daddr=${dest}${origin ? `&saddr=${origin}` : ""}`
+        : app === "waze"
+          ? `https://waze.com/ul?ll=${dest}&navigate=yes&z=17`
+          : `https://www.google.com/maps/dir/?api=1${origin ? `&origin=${origin}` : ""}&destination=${dest}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const [copied, setCopied] = useState(null);
+  const copyCoords = (c) => {
+    const text = `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`;
+    navigator.clipboard?.writeText(text)
+      .then(() => {
+        setCopied(c.name);
+        setTimeout(() => setCopied((n) => (n === c.name ? null : n)), 1500);
+      })
+      .catch(() => {});
+  };
 
   return (
     <div className="g-page">
@@ -1313,7 +1368,7 @@ function DriverChargersPage({ preferences }) {
             {geo.state === "idle" && (
               <>
                 <span className="g-kpi-sub" style={{ margin: 0 }}>
-                  Share your location once — chargers get re-sorted by real distance and drive time.
+                  Share your location once — chargers get re-sorted by road distance and drive time.
                 </span>
                 <button type="button" className="g-btn-sm" onClick={geo.request}>
                   <LocateFixed size={13} /> Use my location
@@ -1373,7 +1428,7 @@ function DriverChargersPage({ preferences }) {
           <div className="g-gps-extra">
             {geo.state === "granted" && nearest && (
               <div style={{ marginBottom: 3 }}>
-                Nearest: <b style={{ color: C.text }}>{nearest.name}</b> · {formatKm(nearest.km)}
+                Nearest: <b style={{ color: C.text }}>{nearest.name}</b> · {distMeta(nearest).label}
               </div>
             )}
             <div>
@@ -1381,6 +1436,13 @@ function DriverChargersPage({ preferences }) {
                 ? `${ordered.length} chargers sorted by distance · ${filteredChargers.length} match filters`
                 : `${nearbyChargers.length} stations in the Vellore area`}
             </div>
+            {geo.state === "granted" && (
+              <div style={{ marginTop: 3, opacity: 0.85 }}>
+                {routeState === "loading" && "Routing road distances…"}
+                {routeState === "ready" && <>Road distance · OSRM routing</>}
+                {routeState === "offline" && <>Straight-line distance · routing service offline</>}
+              </div>
+            )}
           </div>
         </div>
       </Card>
@@ -1458,7 +1520,7 @@ function DriverChargersPage({ preferences }) {
               ) : (
                 filteredChargers.map((c) => {
                   const isNearest = geo.loc && nearest && c.name === nearest.name;
-                  const mins = estDriveMins(c);
+                  const meta = distMeta(c);
                   return (
                   <button
                     type="button"
@@ -1478,13 +1540,16 @@ function DriverChargersPage({ preferences }) {
                         </div>
                         <div className="g-list-sub" style={{ marginTop: 2 }}>
                           {c.connector} · {formatRate(c.price, preferences)}
-                          {mins != null && <> · ≈ {mins} min drive</>}
+                          {meta.mins != null && <> · ≈ {meta.mins} min drive</>}
                         </div>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <Badge status={c.status}>{c.status}</Badge>
-                      <div className="g-list-sub" style={{ marginTop: 6 }}>{distanceLabel(c)}</div>
+                      <div className="g-list-sub" style={{ marginTop: 6 }}>
+                        {meta.label}
+                        {meta.note && <span className="g-route-note">{meta.note === "road" ? "ROAD" : "DIRECT"}</span>}
+                      </div>
                     </div>
                   </button>
                   );
@@ -1546,9 +1611,13 @@ function DriverChargersPage({ preferences }) {
                     <div className="g-map-detail-row">
                       <span className="g-map-detail-label">Distance</span>
                       <span>
-                        {distanceLabel(selectedCharger)}
-                        {geo.loc && selectedCharger.km != null && <> · ≈ {estDriveMins(selectedCharger)} min drive</>}
+                        {distMeta(selectedCharger).label}
+                        {distMeta(selectedCharger).mins != null && <> · ≈ {distMeta(selectedCharger).mins} min drive</>}
                       </span>
+                    </div>
+                    <div className="g-map-detail-row">
+                      <span className="g-map-detail-label">Coordinates</span>
+                      <span className="g-mono">{selectedCharger.lat.toFixed(4)}, {selectedCharger.lng.toFixed(4)}</span>
                     </div>
                     <div className="g-map-detail-row">
                       <span className="g-map-detail-label">Connector</span>
@@ -1566,6 +1635,17 @@ function DriverChargersPage({ preferences }) {
                     >
                       <Navigation size={14} /> Navigate to charger
                     </button>
+                    <div className="g-route-options">
+                      <button type="button" className="g-route-opt" onClick={() => openInMaps(selectedCharger, "apple")}>
+                        Apple Maps
+                      </button>
+                      <button type="button" className="g-route-opt" onClick={() => openInMaps(selectedCharger, "waze")}>
+                        Waze
+                      </button>
+                      <button type="button" className="g-route-opt" onClick={() => copyCoords(selectedCharger)}>
+                        {copied === selectedCharger.name ? "Copied ✓" : "Copy coords"}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 )}
@@ -4567,6 +4647,19 @@ export default function GridPulseApp() {
           font-size:9.5px; letter-spacing:.08em; color:#052e1a; background:${C.green};
           border-radius:10px; padding:2px 7px; font-family:var(--mono); font-weight:600;
         }
+        .g-route-note{
+          display:inline-block; margin-left:6px; vertical-align:middle;
+          font-size:8.5px; letter-spacing:.1em; color:${C.cyan};
+          border:1px solid ${C.cyan}44; background:${C.cyan}0d;
+          border-radius:8px; padding:1px 6px; font-family:var(--mono); font-weight:600;
+        }
+        .g-route-options{display:grid; grid-template-columns:1fr; gap:6px; margin-top:8px;}
+        .g-route-opt{
+          width:100%; text-align:center; padding:8px; border-radius:9px; font-size:12px; font-weight:600;
+          border:1px solid ${C.border}; background:rgba(255,255,255,0.02); color:${C.textDim};
+          transition:border-color .15s ease, background .15s ease, color .15s ease;
+        }
+        .g-route-opt:hover{border-color:${C.cyan}; background:${C.cyanSoft}; color:${C.text};}
         @keyframes g-pulse{
           0%{transform:scale(0.5); opacity:0.6;}
           100%{transform:scale(2); opacity:0;}
