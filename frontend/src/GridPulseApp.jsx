@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import {
   ComposedChart, LineChart, Line, AreaChart, Area, BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -10,7 +10,8 @@ import {
   LayoutDashboard, Settings, Timer, Leaf, BarChart3, History, Radio,
   ArrowUpRight, ArrowDownRight, BatteryCharging, Bell, ShieldOff,
   CloudRain, CloudSun, Droplets, Thermometer, Eye, CreditCard, Wallet, Users, Target, Fuel,
-  Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu, Apple
+  Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu, Apple,
+  LocateFixed, RefreshCw, Navigation
 } from "lucide-react";
 
 import { C, STATUS_COLOR, CONFIDENCE_COLOR } from "./theme.js";
@@ -83,6 +84,70 @@ function Marquee({ items, className }) {
       </div>
     </div>
   );
+}
+
+/* Browser GPS via the Geolocation API. Exposes `loc` (lat/lng/accuracy),
+   a `state` machine (idle → loading → granted|denied|unsupported|error),
+   and `request()` to trigger/refresh the fix. */
+function useGeolocation() {
+  const [loc, setLoc] = useState(null);
+  const [state, setState] = useState("idle");
+  const [error, setError] = useState("");
+
+  const request = useCallback(() => {
+    if (!navigator.geolocation) {
+      setState("unsupported");
+      setError("Geolocation is not available in this browser.");
+      return;
+    }
+    setState("loading");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLoc({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: Math.round(pos.coords.accuracy) || null,
+          at: Date.now(),
+        });
+        setError("");
+        setState("granted");
+      },
+      (err) => {
+        if (err.code === err.PERMISSION_DENIED) {
+          setState("denied");
+          setError("Location access was blocked. Allow it for this site, then retry.");
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          setState("error");
+          setError("No satellite/GPS fix yet — try moving outdoors and retry.");
+        } else {
+          setState("error");
+          setError("Timed out getting a GPS fix — retry.");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+    );
+  }, []);
+
+  return { loc, state, error, request };
+}
+
+/* Haversine great-circle distance in kilometres. */
+function haversineKm(a, b) {
+  const R = 6371;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+/* Format a km figure the way EV users read distances. */
+function formatKm(km) {
+  if (km == null || !isFinite(km)) return "—";
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km.toFixed(1)} km`;
 }
 
 function formatCurrency(value, currency = "INR", region = "India") {
@@ -1162,14 +1227,33 @@ function DriverBatteryPage({ vehicleProfile }) {
 
 function DriverChargersPage({ preferences }) {
   const { nearbyChargers } = useDriverData();
+  const geo = useGeolocation();
   const [selectedCharger, setSelectedCharger] = useState(null);
   const [viewMode, setViewMode] = useState("list");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [proximity, setProximity] = useState("any");
 
-  const filteredChargers = nearbyChargers.filter((charger) => {
-    if (filterStatus === "all") return true;
-    return charger.status === filterStatus;
-  });
+  // Attach a GPS-derived distance when we have a live fix.
+  const withDist = useMemo(
+    () =>
+      nearbyChargers.map((c) => ({
+        ...c,
+        km: geo.loc ? haversineKm(geo.loc, { lat: c.lat, lng: c.lng }) : null,
+      })),
+    [nearbyChargers, geo.loc]
+  );
+
+  // Nearest-first ordering only once a fix exists; otherwise keep backend order.
+  const ordered = useMemo(() => {
+    if (!geo.loc) return withDist;
+    return [...withDist].sort((a, b) => (a.km ?? Infinity) - (b.km ?? Infinity));
+  }, [withDist, geo.loc]);
+
+  const filteredChargers = ordered
+    .filter((charger) => filterStatus === "all" || charger.status === filterStatus)
+    .filter((charger) => proximity === "any" || (charger.km != null && charger.km <= Number(proximity)));
+
+  const nearest = geo.loc ? [...ordered].filter((c) => c.km != null)[0] : null;
 
   const mapData = nearbyChargers.map((charger, index) => {
     const coords = [
@@ -1181,7 +1265,16 @@ function DriverChargersPage({ preferences }) {
       { x: 72, y: 52 },
     ];
     const point = coords[index % coords.length];
-    return { ...charger, x: point.x, y: point.y, matchesFilter: filterStatus === "all" || charger.status === filterStatus };
+    const km = withDist[index]?.km ?? null;
+    return {
+      ...charger,
+      x: point.x,
+      y: point.y,
+      km,
+      matchesFilter:
+        (filterStatus === "all" || charger.status === filterStatus) &&
+        (proximity === "any" || (km != null && km <= Number(proximity))),
+    };
   });
 
   useEffect(() => {
@@ -1190,14 +1283,109 @@ function DriverChargersPage({ preferences }) {
     }
   }, [nearbyChargers, selectedCharger]);
 
+  const distanceLabel = (c) => (geo.loc && c.km != null ? formatKm(c.km) : c.distance);
+
+  const openInMaps = (c) => {
+    if (geo.loc) {
+      window.open(
+        `https://www.google.com/maps/dir/?api=1&origin=${geo.loc.lat},${geo.loc.lng}&destination=${c.lat},${c.lng}`,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    } else {
+      const query = encodeURIComponent(`${c.name}, India`);
+      window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const estDriveMins = (c) => (c.km != null ? Math.max(1, Math.round((c.km / 35) * 60)) : null);
+
   return (
     <div className="g-page">
       <div className="g-page-head">
         <h2>Find chargers</h2>
         <p>Stations near you, with live status and pricing.</p>
       </div>
-      
-      <div className="g-grid g-grid-2" style={{ marginBottom: 16 }}>
+
+      <Card title="GPS connectivity" icon={LocateFixed} style={{ marginBottom: 16 }}>
+        <div className="g-gps-row">
+          <div className="g-gps-main">
+            {geo.state === "idle" && (
+              <>
+                <span className="g-kpi-sub" style={{ margin: 0 }}>
+                  Share your location once — chargers get re-sorted by real distance and drive time.
+                </span>
+                <button type="button" className="g-btn-sm" onClick={geo.request}>
+                  <LocateFixed size={13} /> Use my location
+                </button>
+              </>
+            )}
+
+            {geo.state === "loading" && (
+              <>
+                <Loader2 size={15} className="g-spin" style={{ color: C.cyan }} />
+                <span className="g-kpi-sub" style={{ margin: 0 }}>Acquiring GPS fix…</span>
+              </>
+            )}
+
+            {geo.state === "granted" && geo.loc && (
+              <>
+                <span className="g-live-pill g-live-pill-on">
+                  <span className="g-live-pill-dot" /> GPS lock
+                </span>
+                <span className="g-kpi-sub g-mono" style={{ margin: 0 }}>
+                  {geo.loc.lat.toFixed(4)}°{geo.loc.lat >= 0 ? "N" : "S"}, {geo.loc.lng.toFixed(4)}°{geo.loc.lng >= 0 ? "E" : "W"}
+                  {geo.loc.accuracy ? ` · ±${geo.loc.accuracy} m` : ""}
+                </span>
+                <button type="button" className="g-btn-sm" onClick={geo.request}>
+                  <RefreshCw size={12} /> Re-fix
+                </button>
+              </>
+            )}
+
+            {geo.state === "denied" && (
+              <>
+                <ShieldAlert size={15} style={{ color: C.amber }} />
+                <span className="g-kpi-sub" style={{ margin: 0 }}>
+                  Location is blocked — enable it for this site in your browser, then retry.
+                </span>
+                <button type="button" className="g-btn-sm" onClick={geo.request}>
+                  <RefreshCw size={12} /> Retry
+                </button>
+              </>
+            )}
+
+            {geo.state === "unsupported" && (
+              <span className="g-kpi-sub" style={{ margin: 0 }}>Geolocation isn't available in this browser — showing default distances.</span>
+            )}
+
+            {geo.state === "error" && (
+              <>
+                <XCircle size={15} style={{ color: C.red }} />
+                <span className="g-kpi-sub" style={{ margin: 0 }}>{geo.error}</span>
+                <button type="button" className="g-btn-sm" onClick={geo.request}>
+                  <RefreshCw size={12} /> Retry
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="g-gps-extra">
+            {geo.state === "granted" && nearest && (
+              <div style={{ marginBottom: 3 }}>
+                Nearest: <b style={{ color: C.text }}>{nearest.name}</b> · {formatKm(nearest.km)}
+              </div>
+            )}
+            <div>
+              {geo.state === "granted"
+                ? `${ordered.length} chargers sorted by distance · ${filteredChargers.length} match filters`
+                : `${nearbyChargers.length} stations in the Vellore area`}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <div className="g-grid g-grid-3" style={{ marginBottom: 16 }}>
         <Card title="View mode" icon={LayoutDashboard}>
           <div className="g-view-mode-toggle">
             <button
@@ -1233,6 +1421,29 @@ function DriverChargersPage({ preferences }) {
             ))}
           </div>
         </Card>
+
+        <Card title="Max distance" icon={Navigation}>
+          <div className="g-filter-options">
+            {[
+              ["any", "Any"],
+              ["1", "≤ 1 km"],
+              ["2", "≤ 2 km"],
+              ["5", "≤ 5 km"],
+              ["10", "≤ 10 km"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`g-filter-btn ${proximity === value ? "active" : ""}`}
+                disabled={geo.state !== "granted"}
+                title={geo.state === "granted" ? "" : "Enable GPS to filter by distance"}
+                onClick={() => setProximity(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Card>
       </div>
 
       {viewMode === "list" ? (
@@ -1242,10 +1453,13 @@ function DriverChargersPage({ preferences }) {
               {filteredChargers.length === 0 ? (
                 <div className="g-notification-empty" style={{ padding: 26 }}>
                   <MapPin size={20} style={{ color: C.textDimmer }} />
-                  <span>No chargers match this filter.</span>
+                  <span>No chargers match these filters.</span>
                 </div>
               ) : (
-                filteredChargers.map((c) => (
+                filteredChargers.map((c) => {
+                  const isNearest = geo.loc && nearest && c.name === nearest.name;
+                  const mins = estDriveMins(c);
+                  return (
                   <button
                     type="button"
                     className="g-list-row g-list-row-button"
@@ -1258,16 +1472,23 @@ function DriverChargersPage({ preferences }) {
                     <div className="g-list-main">
                       <StatusDot status={c.status} />
                       <div>
-                        <div>{c.name}</div>
-                        <div className="g-list-sub" style={{ marginTop: 2 }}>{c.connector} · {formatRate(c.price, preferences)}</div>
+                        <div>
+                          {c.name}{" "}
+                          {isNearest && <span className="g-nearest-tag">NEAREST</span>}
+                        </div>
+                        <div className="g-list-sub" style={{ marginTop: 2 }}>
+                          {c.connector} · {formatRate(c.price, preferences)}
+                          {mins != null && <> · ≈ {mins} min drive</>}
+                        </div>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <Badge status={c.status}>{c.status}</Badge>
-                      <div className="g-list-sub" style={{ marginTop: 6 }}>{c.distance}</div>
+                      <div className="g-list-sub" style={{ marginTop: 6 }}>{distanceLabel(c)}</div>
                     </div>
                   </button>
-                ))
+                  );
+                })
               )}
             </div>
           </Card>
@@ -1282,23 +1503,28 @@ function DriverChargersPage({ preferences }) {
                 <div className="g-map-grid-lines" />
                 
                 {/* Charger markers */}
-                {mapData.map((charger, i) => (
+                {mapData.map((charger, i) => {
+                  const isNearest = geo.loc && nearest && charger.name === nearest.name;
+                  return (
                   <button
                     type="button"
                     key={charger.name || i}
-                    className={`g-map-marker g-map-marker-${charger.status} ${charger.matchesFilter ? "" : "g-map-marker-muted"}`}
+                    className={`g-map-marker g-map-marker-${charger.status} ${charger.matchesFilter ? "" : "g-map-marker-muted"} ${isNearest ? "g-map-marker-nearest" : ""}`}
                     style={{ left: `${charger.x}%`, top: `${charger.y}%`, zIndex: selectedCharger?.name === charger.name ? 12 : 8 }}
                     onClick={() => setSelectedCharger(charger)}
                   >
+                    {isNearest && <span className="g-map-marker-ring" />}
                     <MapPin size={20} />
                     <div className="g-map-marker-label">{charger.name}</div>
                   </button>
-                ))}
+                  );
+                })}
                 
                 {/* User location */}
                 <div className="g-map-user-location" style={{ left: "50%", top: "50%" }}>
                   <div className="g-map-user-dot" />
                   <div className="g-map-user-pulse" />
+                  {geo.state === "granted" && <div className="g-map-user-label">You (GPS)</div>}
                 </div>
                 </div>
                 {selectedCharger && (
@@ -1319,7 +1545,10 @@ function DriverChargersPage({ preferences }) {
                     </div>
                     <div className="g-map-detail-row">
                       <span className="g-map-detail-label">Distance</span>
-                      <span>{selectedCharger.distance}</span>
+                      <span>
+                        {distanceLabel(selectedCharger)}
+                        {geo.loc && selectedCharger.km != null && <> · ≈ {estDriveMins(selectedCharger)} min drive</>}
+                      </span>
                     </div>
                     <div className="g-map-detail-row">
                       <span className="g-map-detail-label">Connector</span>
@@ -1333,12 +1562,9 @@ function DriverChargersPage({ preferences }) {
                       type="button"
                       className="g-btn-primary"
                       style={{ marginTop: 12, width: "100%" }}
-                      onClick={() => {
-                        const query = encodeURIComponent(`${selectedCharger.name}, India`);
-                        window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, "_blank", "noopener,noreferrer");
-                      }}
+                      onClick={() => openInMaps(selectedCharger)}
                     >
-                      Navigate to charger
+                      <Navigation size={14} /> Navigate to charger
                     </button>
                   </div>
                 </div>
@@ -4272,6 +4498,7 @@ export default function GridPulseApp() {
         }
         .g-filter-btn:hover{border-color:${C.cyan}; background:${C.cyanSoft}; color:${C.text};}
         .g-filter-btn.active{border-color:${C.cyan}; background:${C.cyanSoft}; color:${C.text};}
+        .g-filter-btn:disabled{opacity:.35; cursor:not-allowed;}
 
         /* ---- map container ---- */
         .g-map-container{position:relative; border-radius:12px; overflow:hidden;}
@@ -4311,6 +4538,34 @@ export default function GridPulseApp() {
         .g-map-user-pulse{
           position:absolute; width:24px; height:24px; border-radius:50%; background:${C.cyan};
           opacity:0.3; animation:g-pulse 2s ease-out infinite;
+        }
+        .g-map-user-label{
+          position:absolute; left:50%; bottom:16px; transform:translateX(-50%);
+          font-size:9.5px; font-family:var(--mono); letter-spacing:.04em; color:${C.cyan};
+          background:rgba(6,14,18,0.75); border:1px solid ${C.cyan}44; padding:2px 7px; border-radius:9px; white-space:nowrap;
+        }
+        .g-map-marker-ring{
+          position:absolute; inset:-7px; border:2px solid ${C.green}; border-radius:50%;
+          opacity:.85; pointer-events:none;
+          box-shadow:0 0 0 3px ${C.green}22;
+        }
+        /* ---- GPS bar ---- */
+        .g-gps-row{display:flex; flex-wrap:wrap; gap:14px 20px; align-items:center; justify-content:space-between;}
+        .g-gps-main{display:flex; flex-wrap:wrap; gap:12px; align-items:center; min-height:32px; flex:1 1 520px;}
+        .g-gps-extra{text-align:right; font-size:11.5px; color:${C.textDimmer}; font-family:var(--mono);}
+        .g-btn-sm{
+          display:inline-flex; align-items:center; gap:7px; padding:7px 14px; border-radius:18px;
+          border:1px solid ${C.cyan}; color:${C.cyan}; background:${C.cyanSoft};
+          font-size:12px; font-weight:600; transition:background .15s ease, transform .15s ease;
+        }
+        .g-btn-sm:hover{background:rgba(79,227,255,0.16); transform:translateY(-1px);}
+        .g-btn-sm:disabled{opacity:.4; cursor:not-allowed; transform:none;}
+        .g-spin{animation:g-spin 1s linear infinite;}
+        @keyframes g-spin{to{transform:rotate(360deg);}}
+        .g-nearest-tag{
+          display:inline-block; margin-left:6px; vertical-align:middle;
+          font-size:9.5px; letter-spacing:.08em; color:#052e1a; background:${C.green};
+          border-radius:10px; padding:2px 7px; font-family:var(--mono); font-weight:600;
         }
         @keyframes g-pulse{
           0%{transform:scale(0.5); opacity:0.6;}

@@ -39,10 +39,10 @@ const fastagTransactions = [
 ];
 
 const nearbyChargers = [
-  { name: "Anna Nagar Hub", distance: "0.6 km", status: "available", price: "$0.16/kWh", connector: "CCS2" },
-  { name: "Vellore Tech Park", distance: "1.4 km", status: "busy", price: "$0.18/kWh", connector: "Type 2" },
-  { name: "CMC Charging Bay", distance: "2.1 km", status: "maintenance", price: "$0.15/kWh", connector: "CCS2" },
-  { name: "Katpadi Junction", distance: "3.0 km", status: "available", price: "$0.17/kWh", connector: "CHAdeMO" },
+  { name: "Anna Nagar Hub", lat: 12.9179, lng: 79.1363, distance: "0.6 km", status: "available", price: "$0.16/kWh", connector: "CCS2" },
+  { name: "Vellore Tech Park", lat: 12.9300, lng: 79.1333, distance: "1.4 km", status: "busy", price: "$0.18/kWh", connector: "Type 2" },
+  { name: "CMC Charging Bay", lat: 12.9110, lng: 79.1267, distance: "2.1 km", status: "maintenance", price: "$0.15/kWh", connector: "CCS2" },
+  { name: "Katpadi Junction", lat: 12.9720, lng: 79.1430, distance: "3.0 km", status: "available", price: "$0.17/kWh", connector: "CHAdeMO" },
 ];
 
 /* Vehicle + charge-planner profiles.
