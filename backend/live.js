@@ -9,6 +9,15 @@ const { EventEmitter } = require("events");
 const RATE_PER_KWH = 0.16; // $/kWh used to estimate live session cost
 const MAX_METER_POINTS = 60;
 
+/* Charge-point identity → physical site, so frontends can join live
+   OCPP telemetry to the "nearby charger" roster. */
+const SITE_BY_IDENTITY = {
+  "ANN-01": "Anna Nagar Hub",
+  "VTP-01": "Vellore Tech Park",
+  "CMC-01": "CMC Charging Bay",
+  "KAT-01": "Katpadi Junction",
+};
+
 const SOURCE_META = {
   ocpp:     { name: "OCPP 1.6 / 2.0.1", project: "ocpp-ws-io", protocol: "WebSocket CSMS · boot / txn / meter values" },
   modbus:   { name: "MODBUS/TCP", project: "OpenModSim", protocol: "Master polls slave registers on :1502" },
@@ -351,6 +360,7 @@ class LiveHub extends EventEmitter {
       stations: [...this.stations.values()].map((s) => ({
         identity: s.identity, protocol: s.protocol, vendor: s.vendor, model: s.model,
         serial: s.serial, firmware: s.firmware, status: s.status, lastSeen: s.lastSeen,
+        site: SITE_BY_IDENTITY[s.identity] || null,
         connectors: Object.entries(s.connectors || {}).map(([id, c]) => ({
           connectorId: id, status: c.status, powerKw: d(c.powerKw), soC: d(c.soC),
           tempC: d(c.tempC), meterKwh: d(c.meterKwh),
@@ -384,4 +394,4 @@ class LiveHub extends EventEmitter {
   }
 }
 
-module.exports = { live: new LiveHub(), RATE_PER_KWH };
+module.exports = { live: new LiveHub(), RATE_PER_KWH, SITE_BY_IDENTITY };

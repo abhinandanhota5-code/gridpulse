@@ -22,10 +22,6 @@ function liveMeta(snap) {
   };
 }
 
-function fmtMoney(n) {
-  return `$${Number(n || 0).toFixed(2)}`;
-}
-
 function buildDriverData() {
   const d = clone(driverData);
   const snap = live.snapshot();
@@ -37,7 +33,7 @@ function buildDriverData() {
       location: `Live · ${t.station}`,
       kwh: t.kwh,
       duration: t.durationMin ? `${t.durationMin} min` : "…",
-      amount: fmtMoney(t.cost),
+      amount: Number(t.cost || 0),
       status: "paid",
       source: "live",
     }));

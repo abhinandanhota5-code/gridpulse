@@ -29,13 +29,13 @@ const driverUpcoming = [
 const fastagId = "FT-IN 6231 8890 4471";
 
 const fastagTransactions = [
-  { id: "TXN-88219", date: "Mon, 7:12 AM", location: "Anna Nagar Hub", kwh: 12, duration: "28 min", amount: "$2.10", status: "paid" },
-  { id: "TXN-88231", date: "Tue, 6:48 PM", location: "Vellore Tech Park", kwh: 18, duration: "44 min", amount: "$3.40", status: "paid" },
-  { id: "TXN-88244", date: "Wed, 8:05 AM", location: "Home charger", kwh: 9, duration: "1h 12m", amount: "$1.60", status: "paid" },
-  { id: "TXN-88259", date: "Thu, 7:30 PM", location: "Katpadi Junction", kwh: 22, duration: "51 min", amount: "$4.00", status: "paid" },
-  { id: "TXN-88267", date: "Fri, 7:55 AM", location: "Anna Nagar Hub", kwh: 15, duration: "36 min", amount: "$2.70", status: "paid" },
-  { id: "TXN-88281", date: "Sat, 5:20 PM", location: "CMC Charging Bay", kwh: 24, duration: "1h 04m", amount: "$4.60", status: "paid" },
-  { id: "TXN-88296", date: "Sun, 6:40 PM", location: "Home charger", kwh: 19, duration: "58 min", amount: "$3.20", status: "pending" },
+  { id: "TXN-88219", date: "Mon, 7:12 AM", location: "Anna Nagar Hub", kwh: 12, duration: "28 min", amount: 2.10, currency: "USD", status: "paid" },
+  { id: "TXN-88231", date: "Tue, 6:48 PM", location: "Vellore Tech Park", kwh: 18, duration: "44 min", amount: 3.40, currency: "USD", status: "paid" },
+  { id: "TXN-88244", date: "Wed, 8:05 AM", location: "Home charger", kwh: 9, duration: "1h 12m", amount: 1.60, currency: "USD", status: "paid" },
+  { id: "TXN-88259", date: "Thu, 7:30 PM", location: "Katpadi Junction", kwh: 22, duration: "51 min", amount: 4.00, currency: "USD", status: "paid" },
+  { id: "TXN-88267", date: "Fri, 7:55 AM", location: "Anna Nagar Hub", kwh: 15, duration: "36 min", amount: 2.70, currency: "USD", status: "paid" },
+  { id: "TXN-88281", date: "Sat, 5:20 PM", location: "CMC Charging Bay", kwh: 24, duration: "1h 04m", amount: 4.60, currency: "USD", status: "paid" },
+  { id: "TXN-88296", date: "Sun, 6:40 PM", location: "Home charger", kwh: 19, duration: "58 min", amount: 3.20, currency: "USD", status: "pending" },
 ];
 
 const nearbyChargers = [

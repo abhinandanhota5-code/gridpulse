@@ -11,12 +11,14 @@ import {
   ArrowUpRight, ArrowDownRight, BatteryCharging, Bell, ShieldOff,
   CloudRain, CloudSun, Droplets, Thermometer, Eye, CreditCard, Wallet, Users, Target, Fuel,
   Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu, Apple,
-  LocateFixed, RefreshCw, Navigation
+  LocateFixed, RefreshCw, Navigation, FileText
 } from "lucide-react";
 
 import { C, STATUS_COLOR, CONFIDENCE_COLOR } from "./theme.js";
 import { useAppData, useDriverData, useOwnerData, useLiveData } from "./DataContext.jsx";
 import { API_BASE_URL, wsBaseUrl, PLATE_EVENT_SAMPLE } from "./api.js";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 /* ---------------------------------------------------------------- */
 /*  Small shared building blocks                                     */
@@ -211,17 +213,96 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function createVehicleProfile(vehicle) {
+/* Deterministic generator so a given registration always yields the same vehicle. */
+function seededRandom(seedText) {
+  let h = 2166136261;
+  for (let i = 0; i < String(seedText).length; i++) {
+    h ^= String(seedText).charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return () => {
+    h += 0x6d2b79f5;
+    let t = h;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function normalizePlate(raw) {
+  return String(raw || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+
+function formatPlate(raw) {
+  const s = normalizePlate(raw);
+  if (!s) return s;
+  if (/^[A-Z]{2}\d{2}/.test(s)) {
+    const series = s.slice(4).match(/^([A-Z]{1,2})(\d{1,4})$/);
+    return `${s.slice(0, 2)} ${s.slice(2, 4)}${series ? ` ${series[1]} ${series[2]}` : ` ${s.slice(4)}`}`;
+  }
+  return s;
+}
+
+const EXSHOWROOM_PRICE_INR = {
+  "Nexon EV": 1450000, "Punch EV": 1250000, "Tiago EV": 850000,
+  IONIQ5: 3890000, Kona: 2380000, ZS: 1850000, Comet: 800000,
+  XUV400: 1580000, BE6: 1990000, Atto3: 2799000, Seal: 4100000,
+};
+
+function daysFromNow(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return { iso: d.toISOString().slice(0, 10), daysLeft: days };
+}
+
+function createVehicleProfile(vehicle, registration = "") {
+  const rand = seededRandom(registration || vehicle?.model || "ev");
   const specs = getVehicleSpecs(vehicle);
-  const capacityRetention = Number((90 + Math.random() * 8.8).toFixed(1));
+  const capacityRetention = Number((90 + rand() * 8.8).toFixed(1));
   const ratedRange = Number.parseInt(specs.range, 10) || 400;
   const monthKwh = randomInt(70, 240);
   const monthlySessions = randomInt(5, 18);
-  const efficiency = Number((5.7 + Math.random() * 2.1).toFixed(1));
-  const currentRange = Math.round(ratedRange * capacityRetention / 100 * (0.42 + Math.random() * 0.28));
+  const efficiency = Number((5.7 + rand() * 2.1).toFixed(1));
+  const currentRange = Math.round(ratedRange * capacityRetention / 100 * (0.42 + rand() * 0.28));
+
+  /* ---- Vehicle / ownership facts (CRED-style, stable per registration) ---- */
+  const purchaseYear = 2021 + Math.floor(rand() * 4);
+  const vehicleAge = Math.max(0.8, new Date().getFullYear() - purchaseYear + rand() * 0.9);
+  const odometerKm = Math.round(8000 + rand() * 44000);
+  const exShowroom = EXSHOWROOM_PRICE_INR[vehicle?.model] || 1400000;
+  const retainedPct = Math.round(Math.max(42, Math.min(93, 94 - vehicleAge * 13 - (odometerKm / 100000) * 6)));
+  const marketValue = Math.round((exShowroom * retainedPct / 100) / 1000) * 1000;
+  const insur = daysFromNow(Math.round(60 + rand() * 260));
+  const puc = daysFromNow(Math.round(30 + rand() * 240));
+  const insurers = ["ICICI Lombard", "HDFC ERGO", "Digit General", "Tata AIG", "Bajaj Allianz"];
+
   return {
     ...vehicle,
     specs,
+    registration: formatPlate(registration),
+    regRaw: normalizePlate(registration),
+    rtoCity: "Vellore, TN",
+    color: ["Pearl White", "Midnight Blue", "Glacier Silver", "Fiery Red", "Phantom Grey"][Math.floor(rand() * 5)],
+    purchaseYear,
+    vehicleAge: Number(vehicleAge.toFixed(1)),
+    odometerKm,
+    exShowroom,
+    marketValue,
+    retainedPct,
+    insurance: {
+      insurer: insurers[Math.floor(rand() * insurers.length)],
+      policyNo: `GP-${Math.floor(202300000 + rand() * 899999)}`,
+      validTill: insur.iso,
+      daysLeft: insur.daysLeft,
+      premium: 1000 * Math.round(14 + rand() * 22),
+      status: insur.daysLeft > 0 ? "Active" : "Expired",
+    },
+    puc: {
+      certNo: `PU-${Math.floor(100000 + rand() * 899999)}`,
+      validTill: puc.iso,
+      daysLeft: puc.daysLeft,
+      status: puc.daysLeft > 0 ? "Valid" : "Expired",
+    },
     currentSoc: randomInt(28, 86),
     capacityRetention,
     chargeCycles: randomInt(48, 780),
@@ -391,12 +472,58 @@ function Sidebar({ items, active, onSelect }) {
 /* ---------------------------------------------------------------- */
 /*  Login screen                                                     */
 /* ---------------------------------------------------------------- */
+const ACCOUNTS_KEY = "gp_accounts_v1";
+
+const DEMO_ACCOUNTS = [
+  { id: "TN84DR5021", password: "demo123", role: "ev", name: "Aarav", ty: "Tata", m: "Nexon EV", t: "Fearless+ S" },
+  { id: "GRIDPULSE", password: "owner123", role: "owner", name: "Fleet Manager" },
+];
+
+function loadAccounts() {
+  try {
+    return JSON.parse(localStorage.getItem(ACCOUNTS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveAccount(accounts) {
+  try {
+    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function ensureDemoAccounts() {
+  const accounts = loadAccounts();
+  let changed = false;
+  DEMO_ACCOUNTS.forEach((demo) => {
+    if (!accounts[demo.id]) {
+      changed = true;
+      accounts[demo.id] = {
+        password: demo.password,
+        role: demo.role,
+        name: demo.name,
+        vehicle:
+          demo.role === "ev"
+            ? createVehicleProfile({ manufacturer: demo.ty, model: demo.m, trim: demo.t }, demo.id)
+            : null,
+      };
+    }
+  });
+  if (changed) saveAccount(accounts);
+  return accounts;
+}
+
 function LoginScreen({ onLogin }) {
   const [role, setRole] = useState("ev");
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState("signin");
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [signupName, setSignupName] = useState("");
   const [manufacturer, setManufacturer] = useState("");
   const [vehicleModel, setVehicleModel] = useState("");
   const [vehicleTrim, setVehicleTrim] = useState("");
@@ -429,18 +556,85 @@ function LoginScreen({ onLogin }) {
   const trims = manufacturer && vehicleModel ? vehicleCatalog[manufacturer][vehicleModel] : [];
 
   function submit() {
-    const name = email.trim() || (role === "ev" ? "Driver" : "Fleet Manager");
-    onLogin({
-      role,
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      vehicle: role === "ev" && mode === "signup"
-        ? createVehicleProfile({ manufacturer, model: vehicleModel, trim: vehicleTrim })
-        : null,
-    });
+    setError("");
+    const id = normalizePlate(identifier);
+    if (!id) {
+      setError(role === "ev" ? "Enter your vehicle registration number." : "Enter your user ID.");
+      return;
+    }
+    if (!password) {
+      setError("Set a password — it stays on this device for this demo.");
+      return;
+    }
+    if (role === "ev" && mode === "signup" && !/([A-Z]{2}\d{2})([A-Z]{1,2}\d{1,4})/.test(id)) {
+      setError("Registration should look like TN 84 DR 5021.");
+      return;
+    }
+    if (role === "ev" && mode === "signup" && (!manufacturer || !vehicleModel || !vehicleTrim)) {
+      setError("Pick your vehicle's manufacturer, model and trim to finish creating the account.");
+      return;
+    }
+
+    const accounts = ensureDemoAccounts();
+
+    if (mode === "signup") {
+      if (accounts[id]) {
+        setError("An account already exists for this ID — sign in instead.");
+        return;
+      }
+      const vehicle =
+        role === "ev"
+          ? createVehicleProfile({ manufacturer, model: vehicleModel, trim: vehicleTrim }, id)
+          : null;
+      const displayName = signupName.trim() || (role === "ev" ? `Driver ${formatPlate(id)}` : "Fleet Manager");
+      accounts[id] = {
+        password,
+        role,
+        name: displayName.charAt(0).toUpperCase() + displayName.slice(1),
+        vehicle,
+      };
+      saveAccount(accounts);
+      onLogin({
+        role,
+        name: accounts[id].name,
+        vehicle,
+        reg: id,
+        accountId: id,
+        provider: "account",
+      });
+      return;
+    }
+
+    const acct = accounts[id];
+    if (!acct) {
+      setError(
+        role === "ev"
+          ? `No account found for ${formatPlate(id)}. Create one, or use the demo below.`
+          : `No owner account found for "${id}". Create one, or use the demo below.`
+      );
+      return;
+    }
+    if (acct.password !== password) {
+      setError("Incorrect password — try again, or reset from the demo accounts.");
+      return;
+    }
+    if (acct.role !== role) {
+      setError(`That ID is registered as ${acct.role === "ev" ? "an EV driver" : "an owner"}. Switch role to continue.`);
+      return;
+    }
+    onLogin({ role: acct.role, name: acct.name, vehicle: acct.vehicle, reg: id, accountId: id, provider: "account" });
+  }
+
+  function fillDemo(demo) {
+    setRole(demo.role);
+    setIdentifier(demo.id);
+    setPassword(demo.password);
+    setError("");
   }
 
   function socialLogin(provider) {
-    onLogin({ role, name: provider === "Google" ? "Google User" : "Apple User", provider });
+    setError("");
+    onLogin({ role, name: provider === "Google" ? "Google User" : "Apple User", provider, reg: normalizePlate(identifier) || undefined });
   }
 
   return (
@@ -518,18 +712,28 @@ function LoginScreen({ onLogin }) {
         </div>
 
         <div className="g-form" onKeyDown={(e) => { if (e.key === "Enter") submit(); }}>
+          {error && (
+            <div className="g-form-error">
+              <ShieldAlert size={13} style={{ flexShrink: 0 }} /> {error}
+            </div>
+          )}
           <label className="g-field">
-            <User size={14} style={{ color: C.textDimmer }} />
+            {role === "ev" ? <Car size={14} style={{ color: C.textDimmer }} /> : <User size={14} style={{ color: C.textDimmer }} />}
             <input
-              type="text" placeholder="User ID" value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              placeholder={role === "ev" ? "Vehicle registration · e.g. TN 84 DR 5021" : "User ID"}
+              value={identifier}
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              onChange={(e) => { setIdentifier(e.target.value.toUpperCase().replace(/\s+/g, "")); setError(""); }}
             />
           </label>
           <label className="g-field">
             <Lock size={14} style={{ color: C.textDimmer }} />
             <input
-              type={showPassword ? "text" : "password"} placeholder="Password" value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              type={showPassword ? "text" : "password"} placeholder={mode === "signup" ? "Set your password" : "Your password"} value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(""); }}
             />
             <button
               type="button"
@@ -543,7 +747,7 @@ function LoginScreen({ onLogin }) {
           {role === "owner" && mode === "signup" && (
             <label className="g-field">
               <Building2 size={14} style={{ color: C.textDimmer }} />
-              <input type="text" placeholder="Company / fleet name" />
+              <input type="text" placeholder="Company / fleet name" value={signupName} onChange={(e) => setSignupName(e.target.value)} />
             </label>
           )}
           {role === "ev" && mode === "signup" && (
@@ -588,6 +792,17 @@ function LoginScreen({ onLogin }) {
           <button type="button" className="g-btn-primary" onClick={submit}>
             {mode === "signin" ? "Sign in" : "Create account"} as {role === "ev" ? "EV Driver" : "Owner"}
           </button>
+          {mode === "signin" && (
+            <div className="g-demo-row">
+              <span className="g-demo-label">Demo accounts</span>
+              <button type="button" className="g-demo-chip" onClick={() => fillDemo(DEMO_ACCOUNTS[0])}>
+                <Car size={12} /> TN 84 DR 5021 · demo123
+              </button>
+              <button type="button" className="g-demo-chip" onClick={() => fillDemo(DEMO_ACCOUNTS[1])}>
+                <Building2 size={12} /> GRIDPULSE · owner123
+              </button>
+            </div>
+          )}
           <div className="g-auth-divider"><span>or continue with</span></div>
           <div className="g-social-actions">
             <button type="button" className="g-social-btn" onClick={() => socialLogin("Google")}>
@@ -599,7 +814,9 @@ function LoginScreen({ onLogin }) {
           </div>
         </div>
         <div className="g-login-foot">
-          Demo build — any user ID &amp; password signs you in as this role.
+          {role === "ev"
+            ? "Sign in with your vehicle registration number and password — your car's value, insurance and PUC load instantly."
+            : "Sign in with your user ID and password — the full network loads instantly."}
         </div>
       </div>
 
@@ -867,6 +1084,106 @@ function TopBar({ name, role, onLogout, notifications, onDismissNotification, on
 /* ---------------------------------------------------------------- */
 /*  Driver — page bodies                                             */
 /* ---------------------------------------------------------------- */
+
+/* CRED-style ownership snapshot: market value, insurance, PUC, FASTag. */
+function VehicleOverviewPanel({ vehicle, preferences }) {
+  const money = (n) => formatCurrency(n, preferences.currency, preferences.region);
+  const { registration, color, vehicleAge, odometerKm, exShowroom, marketValue, retainedPct, insurance, puc } = vehicle || {};
+  const plate = formatPlate(registration || vehicle?.regRaw || "");
+
+  const insurTone = insurance?.status === "Active" ? C.green : C.red;
+  const pucTone = puc?.status === "Valid" ? C.green : C.red;
+
+  return (
+    <Card title="Your vehicle" icon={Car} style={{ marginBottom: 18 }}>
+      <div className="g-vehicle">
+        <div className="g-vehicle-hero">
+          <div className="g-vehicle-avatar"><Car size={22} style={{ color: C.cyan }} /></div>
+          <div className="g-vehicle-hero-main">
+            <div className="g-vehicle-title">
+              {vehicle?.manufacturer ? `${vehicle.manufacturer} ${vehicle.model}` : "Your EV"}
+              {vehicle?.trim ? <span className="g-vehicle-trim">{vehicle.trim}</span> : null}
+            </div>
+            <div className="g-vehicle-plate">{plate || "—"}</div>
+            <div className="g-vehicle-sub">
+              {vehicleAge != null && <span>{vehicleAge} yrs of use</span>}
+              {odometerKm != null && <span>· {odometerKm.toLocaleString("en-IN")} km</span>}
+              {color && <span>· {color}</span>}
+              <span>· RTO {vehicle?.rtoCity || "Vellore, TN"}</span>
+            </div>
+          </div>
+          {vehicle?.specs?.battery && (
+            <div className="g-vehicle-specs">
+              <span>{vehicle.specs.battery} · up to {vehicle.specs.range}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="g-vehicle-blocks">
+          <div className="g-vehicle-block">
+            <div className="g-vehicle-block-label">Current market value</div>
+            <div className="g-vehicle-value">{marketValue ? money(marketValue) : "—"}</div>
+            <div className="g-vehicle-block-sub">
+              Original {exShowroom ? money(exShowroom) : "—"} · <b style={{ color: C.green }}>{retainedPct ?? 0}% retained</b> after {vehicleAge ?? 0} yrs
+            </div>
+            <div className="g-progress">
+              <i style={{ width: `${retainedPct ?? 0}%`, background: C.green }} />
+            </div>
+          </div>
+
+          <div className="g-vehicle-block">
+            <div className="g-vehicle-block-label">
+              Insurance <span className="g-vehicle-chip" style={{ color: insurTone, borderColor: insurTone }}>{insurance?.status || "—"}</span>
+            </div>
+            <div className="g-vehicle-block-main">{insurance?.insurer || "—"}</div>
+            <div className="g-vehicle-block-sub">
+              Policy {insurance?.policyNo || "—"} · valid till {insurance?.validTill || "—"}
+              {insurance?.daysLeft != null && <b style={{ color: insurance.daysLeft < 90 ? C.amber : C.text }}> · {insurance.daysLeft} days left</b>}
+            </div>
+            <div className="g-vehicle-block-sub">Premium paid {insurance?.premium ? money(insurance.premium) : "—"}</div>
+          </div>
+
+          <div className="g-vehicle-block">
+            <div className="g-vehicle-block-label">
+              PUC (pollution check) <span className="g-vehicle-chip" style={{ color: pucTone, borderColor: pucTone }}>{puc?.status || "—"}</span>
+            </div>
+            <div className="g-vehicle-block-main">Valid till {puc?.validTill || "—"}</div>
+            <div className="g-vehicle-block-sub">
+              Cert {puc?.certNo || "—"} · EV — zero tailpipe emissions
+              {puc?.daysLeft != null && puc.daysLeft < 60 && <b style={{ color: C.amber }}> · renew within {puc.daysLeft} days</b>}
+            </div>
+          </div>
+
+          <div className="g-vehicle-block">
+            <div className="g-vehicle-block-label">FASTag wallet</div>
+            <div className="g-vehicle-block-main g-mono">Linked to {plate || "your plate"}</div>
+            <div className="g-vehicle-block-sub">Prepaid toll + charging balance · auto top-up on</div>
+          </div>
+        </div>
+
+        <div className="g-vehicle-reminders">
+          <span className="g-vehicle-reminder-title">Reminders</span>
+          {insurance?.daysLeft != null && insurance.daysLeft < 120 && (
+            <span className="g-vehicle-reminder" style={{ color: C.amber }}>
+              <ShieldAlert size={13} /> Renew insurance in {insurance.daysLeft} days
+            </span>
+          )}
+          {puc?.daysLeft != null && puc.daysLeft < 60 && (
+            <span className="g-vehicle-reminder" style={{ color: C.amber }}>
+              <FileText size={13} /> PUC expiring — {puc.daysLeft} days left
+            </span>
+          )}
+          {(insurance?.daysLeft == null || insurance.daysLeft >= 120) && (puc?.daysLeft == null || puc.daysLeft >= 60) && (
+            <span className="g-vehicle-reminder" style={{ color: C.green }}>
+              <CheckCircle2 size={13} /> No dues right now — everything valid for {vehicleAge ?? 0} yrs of ownership
+            </span>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function DriverOverviewPage({ name, preferences, vehicleProfile }) {
   const {
     currentSoc, vehicleName, currentWeather, driverBatteryHealth,
@@ -933,6 +1250,8 @@ function DriverOverviewPage({ name, preferences, vehicleProfile }) {
           {isCustomizing ? 'Done' : 'Customize'}
         </button>
       </div>
+
+      <VehicleOverviewPanel vehicle={vehicleProfile} preferences={preferences} />
 
       <div className="g-grid g-grid-4 g-dashboard-metrics">
         {kpiOrder.map((key, index) => (
@@ -1065,10 +1384,35 @@ function DriverOverviewPage({ name, preferences, vehicleProfile }) {
 
 function DriverHistoryPage({ preferences }) {
   const { driverChargeHistory, driverCostHistory, fastagId, fastagTransactions } = useDriverData();
-  
+  const { live } = useLiveData();
+
+  // Merge live OCPP transactions into the FASTag ledger in real time,
+  // deduped by id so a refreshed SSE snapshot never doubles a row.
+  const fastagRows = useMemo(() => {
+    const liveRows = (live?.transactions || []).map((t) => ({
+      id: `OCPP-${t.ocppTransactionId || t.id}`,
+      date: new Date(t.endTime).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+      location: `Live · ${t.station || "charger"}`,
+      kwh: t.kwh ?? "…",
+      duration: t.durationMin ? `${Math.round(t.durationMin)} min` : "…",
+      amount: Number(t.cost || 0),
+      status: "paid",
+      live: true,
+    }));
+    const seen = new Set();
+    return [...liveRows, ...fastagTransactions].filter((r) => {
+      if (!r.id) return true;
+      if (seen.has(r.id)) return false;
+      seen.add(r.id);
+      return true;
+    });
+  }, [live, fastagTransactions]);
+
   const handleExportHistory = () => {
-    exportToCSV(fastagTransactions, `charging-history-${new Date().toISOString().split('T')[0]}`);
+    exportToCSV(fastagRows.map(({ live, ...rest }) => rest), `charging-history-${new Date().toISOString().split('T')[0]}`);
   };
+
+  const liveCount = fastagRows.filter((r) => r.live).length;
 
   return (
     <div className="g-page">
@@ -1117,7 +1461,16 @@ function DriverHistoryPage({ preferences }) {
         <Card
           title="FASTag transaction history"
           icon={CreditCard}
-          action={<span className="g-mono" style={{ color: C.textDim }}>{fastagId}</span>}
+          action={
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {liveCount > 0 && (
+                <span className="g-live-pill g-live-pill-on">
+                  <span className="g-live-pill-dot" /> {liveCount} live
+                </span>
+              )}
+              <span className="g-mono" style={{ color: C.textDim }}>{fastagId}</span>
+            </span>
+          }
           exportable
           onExport={handleExportHistory}
         >
@@ -1125,9 +1478,12 @@ function DriverHistoryPage({ preferences }) {
             <div className="g-table-row g-table-row-6 g-table-head">
               <span>Date & time</span><span>Charging station</span><span>Energy</span><span>Duration</span><span>Payment mode</span><span>Amount paid</span>
             </div>
-            {fastagTransactions.map((t) => (
+            {fastagRows.map((t) => (
               <div className="g-table-row g-table-row-6" key={t.id}>
-                <span className="g-list-sub">{t.date}</span>
+                <span className="g-list-sub">
+                  {t.date}
+                  {t.live && <span className="g-live-mini">LIVE</span>}
+                </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <MapPin size={12} style={{ color: C.textDimmer, flexShrink: 0 }} />
                   <span>{t.location}</span>
@@ -1136,15 +1492,19 @@ function DriverHistoryPage({ preferences }) {
                 <span>{t.duration}</span>
                 <span className="g-mono" style={{ fontSize: 11 }}>FASTag ••4471</span>
                 <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <strong>{t.amount}</strong>
-                  <Badge status={t.status}>{t.status}</Badge>
+                  <strong>{formatCurrency(t.amount, preferences.currency, preferences.region)}</strong>
+                  {t.live && <Badge status="paid">live</Badge>}
+                  {!t.live && <Badge status={t.status}>{t.status}</Badge>}
                 </span>
               </div>
             ))}
           </div>
           <div className="g-insight" style={{ marginTop: 12 }}>
             <CreditCard size={14} style={{ color: C.cyan, flexShrink: 0, marginTop: 2 }} />
-            <span>Every session auto-settles from your linked FASTag wallet as soon as you unplug — no manual payment step at the charger.</span>
+            <span>
+              Every session auto-settles from your linked FASTag wallet as soon as you unplug —
+              no manual payment step at the charger. {liveCount > 0 ? `Waiting on ${liveCount} live session${liveCount > 1 ? "s" : ""} from the OCPP gateway.` : "New OCPP sessions stream in here live as they settle."}
+            </span>
           </div>
         </Card>
       </div>
@@ -1225,8 +1585,151 @@ function DriverBatteryPage({ vehicleProfile }) {
   );
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/* Real Leaflet + OpenStreetMap charge-point map (dark CARTO basemap).
+   Renders a pin per charger (colored by live status), an optional GPS
+   user marker with an accuracy ring, and popups with live conditions. */
+function ChargerMap({ chargers, userFix, selectedName, onSelect }) {
+  const elRef = useRef(null);
+  const mapRef = useRef(null);
+  const markersRef = useRef({});
+  const layerRef = useRef(null);
+  const userLayerRef = useRef(null);
+  const fittedRef = useRef(false);
+  const [mapError, setMapError] = useState("");
+
+  // Init the map once (guarded so a Leaflet failure can never blank the app).
+  useEffect(() => {
+    const el = elRef.current;
+    if (!el || mapRef.current) return;
+    let map;
+    try {
+      map = L.map(el, { zoomControl: true, attributionControl: false });
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: "abcd",
+        maxZoom: 19,
+        detectRetina: true,
+      }).addTo(map);
+      L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
+      layerRef.current = L.layerGroup().addTo(map);
+      mapRef.current = map;
+    } catch (err) {
+      setMapError("Map tiles failed to initialise — the list view works.");
+      if (map) map.remove();
+      return;
+    }
+    const t = setTimeout(() => map.invalidateSize(), 80);
+    const t2 = setTimeout(() => map.invalidateSize(), 600);
+    let ro;
+    try {
+      ro = new ResizeObserver(() => map.invalidateSize());
+      ro.observe(el);
+    } catch {
+      /* no ResizeObserver needed */
+    }
+    return () => {
+      clearTimeout(t);
+      clearTimeout(t2);
+      if (ro) ro.disconnect();
+      map.remove();
+      mapRef.current = null;
+      layerRef.current = null;
+      markersRef.current = {};
+      userLayerRef.current = null;
+    };
+  }, []);
+
+  // One-time framing: GPS fix wins, otherwise wrap the charger cluster.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || fittedRef.current) return;
+    fittedRef.current = true;
+    if (userFix) map.setView([userFix.lat, userFix.lng], 13);
+    else if (chargers.length) map.fitBounds(L.latLngBounds(chargers.map((c) => [c.lat, c.lng])).pad(0.22), { maxZoom: 14 });
+  }, [userFix, chargers]);
+
+  // Charger pins (rebuilt when conditions/distances update).
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = layerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    markersRef.current = {};
+    chargers.forEach((c) => {
+      if (!c.lat || !c.lng) return;
+      const color = STATUS_COLOR[c.status] || C.cyan;
+      const dot = document.createElement("div");
+      dot.className = c.matchesFilter ? "g-lf-pin" : "g-lf-pin g-lf-pin-off";
+      dot.style.setProperty("--pin", color);
+      const icon = L.divIcon({ className: "g-lf-icon", html: dot.outerHTML, iconSize: [16, 16], iconAnchor: [8, 8] });
+      const m = L.marker([c.lat, c.lng], { icon });
+      m.bindPopup(popupHtml(c));
+      m.on("click", () => onSelect(c));
+      m.addTo(layer);
+      markersRef.current[c.name] = m;
+    });
+    if (selectedName && markersRef.current[selectedName]) {
+      const m = markersRef.current[selectedName];
+      m.openPopup();
+      map.panTo(m.getLatLng(), { animate: true });
+    }
+  }, [chargers, selectedName, onSelect]);
+
+  // GPS user marker + accuracy ring.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (userLayerRef.current) map.removeLayer(userLayerRef.current);
+    userLayerRef.current = null;
+    if (!userFix || !userFix.lat) return;
+    const lg = L.layerGroup().addTo(map);
+    if (userFix.accuracy) {
+      L.circle([userFix.lat, userFix.lng], {
+        radius: Math.max(userFix.accuracy, 25),
+        color: C.cyan, weight: 1, opacity: 0.55,
+        fillColor: C.cyan, fillOpacity: 0.07,
+        interactive: false,
+      }).addTo(lg);
+    }
+    const dot = document.createElement("div");
+    dot.className = "g-lf-user-dot";
+    L.marker([userFix.lat, userFix.lng], {
+      icon: L.divIcon({ className: "g-lf-icon", html: dot.outerHTML, iconSize: [16, 16], iconAnchor: [8, 8] }),
+      zIndexOffset: 1000,
+    }).addTo(lg);
+    userLayerRef.current = lg;
+    if (fittedRef.current) map.setView([userFix.lat, userFix.lng], Math.max(map.getZoom(), 13));
+  }, [userFix]);
+
+  function popupHtml(c) {
+    const color = STATUS_COLOR[c.status] || C.cyan;
+    const lines = [
+      `<b>${escapeHtml(c.name)}</b>`,
+      `<span style="color:${color}">● ${escapeHtml(c.statusLabel || c.status)}</span>`,
+      c.connector ? `Connector · ${escapeHtml(c.connector)}` : null,
+      c.priceLabel ? `Rate · ${escapeHtml(c.priceLabel)}${c.priceNow ? ` <span style="color:${C.amber}">(now ${escapeHtml(c.priceNow)})</span>` : ""}` : null,
+      c.distLabel ? `Distance · ${escapeHtml(c.distLabel)}${c.mins != null ? ` · ≈ ${c.mins} min drive` : ""}` : null,
+      c.chargingNow ? `<span style="color:${C.cyan}">⚡ ${c.loadKw != null ? `${c.loadKw.toFixed(1)} kW` : "Charging"}${c.soc != null ? ` · SoC ${Math.round(c.soc)}%` : ""}</span>` : null,
+    ].filter(Boolean).join("<br/>");
+    return `<div class="g-lf-pop">${lines}</div>`;
+  }
+  if (mapError) {
+    return <div className="g-map-leaflet"><div className="g-map-fallback"><MapPin size={18} style={{ color: C.amber }} /><span>{mapError}</span></div></div>;
+  }
+  return <div className="g-map-leaflet" ref={elRef} />;
+}
+
 function DriverChargersPage({ preferences }) {
   const { nearbyChargers } = useDriverData();
+  const { live } = useLiveData();
   const geo = useGeolocation();
   const [selectedCharger, setSelectedCharger] = useState(null);
   const [viewMode, setViewMode] = useState("list");
@@ -1242,6 +1745,51 @@ function DriverChargersPage({ preferences }) {
       })),
     [nearbyChargers, geo.loc]
   );
+
+  // ---- Realtime station condition: join live OCPP telemetry by site. ----
+  const stationFor = (name) => (live?.stations || []).find((s) => s.site === name);
+  const activeDr = (live?.drEvents || []).find((e) => !e.cancelled && new Date(e.endAt) > Date.now());
+
+  function liveStatusOf(st) {
+    const conns = st.connectors || [];
+    if (!st || st.status !== "online") return { status: "offline", label: "Offline" };
+    if (conns.some((c) => c.status === "Faulted" || c.status === "Unavailable")) return { status: "maintenance", label: "Maintenance" };
+    if (conns.some((c) => c.status === "Charging" || c.status === "Occupied")) return { status: "busy", label: "Charging" };
+    return { status: "available", label: "Available" };
+  }
+
+  const effective = withDist.map((c) => {
+    const st = stationFor(c.name);
+    const liveSt = st ? liveStatusOf(st) : null;
+    const conns = st?.connectors || [];
+    const loadKw = conns.reduce((n, x) => n + (x.powerKw || 0), 0);
+    const chargingNow = conns.some((x) => x.status === "Charging" || x.status === "Occupied");
+    const soc = conns.reduce((m, x) => Math.max(m, x.soC || 0), 0) || null;
+    const tempC = conns.reduce((m, x) => Math.max(m, x.tempC || 0), 0) || null;
+    const drPct = activeDr?.signalPercent || 0;
+    const priceNow = activeDr && st ? (parseFloat(c.price) || 0.16) * (1 + drPct / 100) : null;
+    const priceLabel = formatRate(c.price, preferences);
+    return {
+      ...c,
+      status: liveSt ? liveSt.status : c.status,
+      statusLabel: liveSt ? liveSt.label : c.status,
+      priceLabel,
+      priceNow: priceNow != null ? `$${priceNow.toFixed(2)}/kWh` : null,
+      live: st
+        ? {
+            online: st.status === "online",
+            lastSeen: st.lastSeen,
+            vendor: st.vendor,
+            model: st.model,
+            protocol: st.protocol,
+            loadKw,
+            chargingNow,
+            soc,
+            tempC,
+          }
+        : null,
+    };
+  });
 
   // Road distances + drive times from the OSRM public routing service.
   // Falls back to straight-line automatically when offline/slow.
@@ -1286,9 +1834,9 @@ function DriverChargersPage({ preferences }) {
 
   // Nearest-first ordering only once a fix exists; otherwise keep backend order.
   const ordered = useMemo(() => {
-    if (!geo.loc) return withDist;
-    return [...withDist].sort((a, b) => (effKm(a) ?? Infinity) - (effKm(b) ?? Infinity));
-  }, [withDist, geo.loc, routes]);
+    if (!geo.loc) return effective;
+    return [...effective].sort((a, b) => (effKm(a) ?? Infinity) - (effKm(b) ?? Infinity));
+  }, [effective, geo.loc, routes]);
 
   const filteredChargers = ordered
     .filter((charger) => filterStatus === "all" || charger.status === filterStatus)
@@ -1296,25 +1844,17 @@ function DriverChargersPage({ preferences }) {
 
   const nearest = geo.loc ? [...ordered].filter((c) => effKm(c) != null)[0] : null;
 
-  const mapData = nearbyChargers.map((charger, index) => {
-    const coords = [
-      { x: 18, y: 24 },
-      { x: 64, y: 24 },
-      { x: 30, y: 68 },
-      { x: 80, y: 70 },
-      { x: 52, y: 42 },
-      { x: 72, y: 52 },
-    ];
-    const point = coords[index % coords.length];
-    const km = effKm(charger);
+  const mapData = effective.map((charger) => {
+    const r = routes[charger.name];
+    const distLabel = r ? formatKm(r.km) : geo.loc && charger.km != null ? formatKm(charger.km) : charger.distance;
+    const mins = r ? r.minutes : geo.loc && charger.km != null ? effMins(charger) : null;
     return {
       ...charger,
-      x: point.x,
-      y: point.y,
-      km,
+      distLabel,
+      mins,
       matchesFilter:
         (filterStatus === "all" || charger.status === filterStatus) &&
-        (proximity === "any" || (km != null && km <= Number(proximity))),
+        (proximity === "any" || (effKm(charger) != null && effKm(charger) <= Number(proximity))),
     };
   });
 
@@ -1537,15 +2077,28 @@ function DriverChargersPage({ preferences }) {
                         <div>
                           {c.name}{" "}
                           {isNearest && <span className="g-nearest-tag">NEAREST</span>}
+                          {c.live?.online && <span className="g-live-mini">LIVE</span>}
                         </div>
                         <div className="g-list-sub" style={{ marginTop: 2 }}>
-                          {c.connector} · {formatRate(c.price, preferences)}
+                          {c.connector} · {c.priceLabel}
+                          {c.priceNow && <span style={{ color: C.amber }}> (now {c.priceNow})</span>}
                           {meta.mins != null && <> · ≈ {meta.mins} min drive</>}
                         </div>
+                        {c.live && (
+                          <div className="g-list-sub" style={{ marginTop: 2 }}>
+                            <span style={{ color: c.live.online ? C.green : C.red }}>
+                              {c.live.online ? "OCPP online" : "OCPP offline"}
+                            </span>
+                            {c.live.chargingNow && (
+                              <> · ⚡ {c.live.loadKw.toFixed(1)} kW{c.live.soc != null ? ` · SoC ${Math.round(c.live.soc)}%` : ""}</>
+                            )}
+                            {c.live.tempC != null && <> · {c.live.tempC.toFixed(0)}°C</>}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <Badge status={c.status}>{c.status}</Badge>
+                      <Badge status={c.status}>{c.statusLabel}</Badge>
                       <div className="g-list-sub" style={{ marginTop: 6 }}>
                         {meta.label}
                         {meta.note && <span className="g-route-note">{meta.note === "road" ? "ROAD" : "DIRECT"}</span>}
@@ -1563,39 +2116,17 @@ function DriverChargersPage({ preferences }) {
           <Card title="Interactive map" icon={MapPin}>
             <div className="g-map-container">
               <div className="g-map-workspace">
-                <div className="g-map-grid">
-                {/* Grid lines */}
-                <div className="g-map-grid-lines" />
-                
-                {/* Charger markers */}
-                {mapData.map((charger, i) => {
-                  const isNearest = geo.loc && nearest && charger.name === nearest.name;
-                  return (
-                  <button
-                    type="button"
-                    key={charger.name || i}
-                    className={`g-map-marker g-map-marker-${charger.status} ${charger.matchesFilter ? "" : "g-map-marker-muted"} ${isNearest ? "g-map-marker-nearest" : ""}`}
-                    style={{ left: `${charger.x}%`, top: `${charger.y}%`, zIndex: selectedCharger?.name === charger.name ? 12 : 8 }}
-                    onClick={() => setSelectedCharger(charger)}
-                  >
-                    {isNearest && <span className="g-map-marker-ring" />}
-                    <MapPin size={20} />
-                    <div className="g-map-marker-label">{charger.name}</div>
-                  </button>
-                  );
-                })}
-                
-                {/* User location */}
-                <div className="g-map-user-location" style={{ left: "50%", top: "50%" }}>
-                  <div className="g-map-user-dot" />
-                  <div className="g-map-user-pulse" />
-                  {geo.state === "granted" && <div className="g-map-user-label">You (GPS)</div>}
-                </div>
-                </div>
+                <ChargerMap
+                  chargers={mapData}
+                  userFix={geo.state === "granted" ? geo.loc : null}
+                  selectedName={selectedCharger?.name || null}
+                  onSelect={setSelectedCharger}
+                />
                 {selectedCharger && (
                 <div className="g-map-details">
                   <div className="g-map-details-header">
                     <h3>{selectedCharger.name}</h3>
+                    {selectedCharger.live?.online && <span className="g-live-mini">LIVE</span>}
                     <button 
                       className="g-btn-ghost"
                       onClick={() => setSelectedCharger(null)}
@@ -1606,7 +2137,7 @@ function DriverChargersPage({ preferences }) {
                   <div className="g-map-details-content">
                     <div className="g-map-detail-row">
                       <span className="g-map-detail-label">Status</span>
-                      <Badge status={selectedCharger.status}>{selectedCharger.status}</Badge>
+                      <Badge status={selectedCharger.status}>{selectedCharger.statusLabel}</Badge>
                     </div>
                     <div className="g-map-detail-row">
                       <span className="g-map-detail-label">Distance</span>
@@ -1625,8 +2156,32 @@ function DriverChargersPage({ preferences }) {
                     </div>
                     <div className="g-map-detail-row">
                       <span className="g-map-detail-label">Price</span>
-                      <span>{formatRate(selectedCharger.price, preferences)}</span>
+                      <span>
+                        {selectedCharger.priceLabel}
+                        {selectedCharger.priceNow && <span style={{ color: C.amber }}> → now {selectedCharger.priceNow}</span>}
+                      </span>
                     </div>
+                    {selectedCharger.live && (
+                      <>
+                        <div className="g-map-detail-row">
+                          <span className="g-map-detail-label">Telemetry</span>
+                          <span className="g-mono" style={{ fontSize: 11 }}>
+                            {selectedCharger.live.online
+                              ? selectedCharger.live.chargingNow
+                                ? <>⚡ {selectedCharger.live.loadKw.toFixed(1)} kW · SoC {Math.round(selectedCharger.live.soc || 0)}%</>
+                                : "Idle · online"
+                              : "Offline"}
+                            {selectedCharger.live.tempC != null && <> · {selectedCharger.live.tempC.toFixed(0)}°C</>}
+                          </span>
+                        </div>
+                        <div className="g-map-detail-row">
+                          <span className="g-map-detail-label">Device</span>
+                          <span className="g-mono" style={{ fontSize: 11 }}>
+                            {selectedCharger.live.vendor} {selectedCharger.live.model} · {selectedCharger.live.protocol}
+                          </span>
+                        </div>
+                      </>
+                    )}
                     <button
                       type="button"
                       className="g-btn-primary"
@@ -4102,11 +4657,27 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
   );
 }
 
+const SESSION_KEY = "gp_session_v1";
+
+function restoreSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (!s || !s.role) return null;
+    if (s.at && Date.now() - s.at > 7 * 24 * 3600 * 1000) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
 /* ---------------------------------------------------------------- */
 /*  Root                                                              */
 /* ---------------------------------------------------------------- */
 export default function GridPulseApp() {
-  const [session, setSession] = useState(null); // { role, name } | null
+  const [session, setSession] = useState(() => restoreSession()); // { role, name, vehicle } | null
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [notifications, setNotifications] = useState([
     { id: 1, type: 'alert', message: 'Charger C-033 offline at Anna Nagar Hub', time: '2 min ago', read: false },
     { id: 2, type: 'success', message: 'Demand response event completed successfully', time: '15 min ago', read: false },
@@ -4115,6 +4686,21 @@ export default function GridPulseApp() {
   ]);
   const [preferences, setPreferences] = useState({ currency: 'INR', region: 'India' });
   const [showHelpModal, setShowHelpModal] = useState(false);
+
+  /* Persist the session so a reload keeps you signed in (no bounce to login). */
+  useEffect(() => {
+    try {
+      if (session) localStorage.setItem(SESSION_KEY, JSON.stringify({ ...session, at: Date.now() }));
+      else localStorage.removeItem(SESSION_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  }, [session]);
+
+  const confirmLogout = () => {
+    setSession(null);
+    setShowLogoutModal(false);
+  };
 
   const handleDismissNotification = (id) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
@@ -4284,6 +4870,18 @@ export default function GridPulseApp() {
         .g-google-mark{background:conic-gradient(from -45deg, #4285f4 0 25%, #34a853 25% 46%, #fbbc05 46% 68%, #ea4335 68% 86%, #4285f4 86%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;}
         .g-apple-mark{color:${C.text};}
 
+        .g-form-error{
+          display:flex; align-items:flex-start; gap:8px; padding:9px 11px; border-radius:10px;
+          border:1px solid rgba(255,76,76,0.35); background:rgba(255,76,76,0.08); color:#ff7a7a; font-size:12.5px;
+        }
+        .g-demo-row{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:2px;}
+        .g-demo-label{font-size:10.5px; color:${C.textDimmer}; font-family:var(--mono); letter-spacing:0.04em; text-transform:uppercase;}
+        .g-demo-chip{
+          display:inline-flex; align-items:center; gap:6px; padding:5px 10px; font-size:11px;
+          border:1px dashed ${C.border}; border-radius:999px; color:${C.textDim}; background:none;
+        }
+        .g-demo-chip:hover{color:${C.cyan}; border-color:${C.cyan};}
+
         .g-btn-primary{
           margin-top:6px; padding:12px; border-radius:10px; border:none; text-align:center;
           background:${C.cyan}; color:#001217; font-weight:600; font-size:13.5px;
@@ -4292,7 +4890,12 @@ export default function GridPulseApp() {
           display:flex; align-items:center; gap:6px; background:none; border:1px solid ${C.border};
           color:${C.textDim}; padding:7px 12px; border-radius:8px; font-size:12.5px;
         }
+        .g-btn-danger{
+          display:flex; align-items:center; justify-content:center; gap:6px; background:#e5484d; color:#fff; margin-top:0;
+        }
         .g-login-foot{margin-top:16px; font-size:11px; color:${C.textDimmer}; font-family:var(--mono); text-align:center;}
+        .g-modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:20px;}
+        .g-logout-note{display:flex; align-items:flex-start; gap:10px; padding:12px 14px; border-radius:12px; border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.02); color:${C.textDim}; font-size:13px; line-height:1.55;}
 
         /* ---- topbar ---- */
         .g-topbar{
@@ -4583,6 +5186,79 @@ export default function GridPulseApp() {
         /* ---- map container ---- */
         .g-map-container{position:relative; border-radius:12px; overflow:hidden;}
         .g-map-workspace{display:grid; grid-template-columns:minmax(0, 1fr) 280px; gap:14px; align-items:stretch;}
+
+        /* ---- real Leaflet map ---- */
+        .g-map-leaflet{
+          position:relative; height:460px; min-width:0;
+          background:linear-gradient(180deg, #0d1520, #0b1119);
+          border:1px solid ${C.border}; border-radius:12px; overflow:hidden;
+        }
+        .g-map-leaflet .leaflet-container{height:100%; width:100%; background:#0b1119;}
+        .g-map-leaflet .leaflet-control-zoom a{background:${C.panelSolid}; color:${C.text}; border-color:${C.border};}
+        .g-map-leaflet .leaflet-control-zoom a:hover{background:rgba(255,255,255,0.08); color:${C.cyan};}
+        .g-map-leaflet .leaflet-bar{border:1px solid ${C.border}; box-shadow:0 8px 24px rgba(0,0,0,0.3);}
+        .g-map-leaflet .leaflet-control-scale-line{background:rgba(6,14,18,0.7); color:${C.textDim}; border-color:${C.textDimmer}; font-size:10px; padding:1px 5px;}
+        .g-map-leaflet .leaflet-popup-content-wrapper{background:${C.panelSolid}; color:${C.text}; box-shadow:0 12px 32px rgba(0,0,0,0.45); border:1px solid ${C.border}; border-radius:12px;}
+        .g-map-leaflet .leaflet-popup-content{margin:12px 14px; font-size:12px; line-height:1.6;}
+        .g-map-leaflet .leaflet-popup-tip{background:${C.panelSolid}; border:1px solid ${C.border};}
+        .g-map-leaflet .leaflet-container a.leaflet-popup-close-button{color:${C.textDimmer};}
+        .g-lf-icon{background:none; border:none;}
+        .g-lf-pin{
+          width:14px; height:14px; border-radius:50%; background:var(--pin);
+          border:2px solid rgba(255,255,255,0.85); position:relative;
+          box-shadow:0 2px 8px rgba(0,0,0,0.5), 0 0 0 4px color-mix(in srgb, var(--pin) 25%, transparent);
+        }
+        .g-lf-pin::after{
+          content:''; position:absolute; inset:-8px; border-radius:50%;
+          border:1px solid var(--pin); opacity:.55; animation:g-pin-pulse 2.2s ease-out infinite;
+        }
+        @keyframes g-pin-pulse{0%{transform:scale(0.5); opacity:.7;}100%{transform:scale(1.35); opacity:0;}}
+        .g-lf-pin-off{filter:grayscale(0.6); opacity:0.45;}
+        .g-lf-user-dot{
+          width:14px; height:14px; border-radius:50%; background:${C.cyan};
+          border:2px solid #fff; box-shadow:0 0 0 4px ${C.cyan}26, 0 0 16px ${C.cyan};
+        }
+        .g-lf-pop b{color:${C.text};}
+        .g-map-fallback{
+          height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+          color:${C.textDim}; font-size:13px; text-align:center; padding:24px;
+        }
+
+        /* ---- vehicle ownership panel (CRED-style) ---- */
+        .g-vehicle{display:flex; flex-direction:column; gap:16px;}
+        .g-vehicle-hero{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+        .g-vehicle-avatar{
+          width:52px; height:52px; border-radius:14px; display:flex; align-items:center; justify-content:center;
+          background:${C.cyanSoft}; border:1px solid ${C.cyan}33; flex-shrink:0;
+        }
+        .g-vehicle-hero-main{flex:1 1 260px; min-width:0;}
+        .g-vehicle-title{font-size:16px; font-weight:600; color:${C.text}; letter-spacing:-0.01em;}
+        .g-vehicle-trim{display:inline-block; margin-left:8px; font-size:10.5px; color:${C.textDim}; font-family:var(--mono); border:1px solid ${C.border}; border-radius:8px; padding:1px 7px; vertical-align:2px;}
+        .g-vehicle-plate{
+          display:inline-block; margin-top:5px; font-family:var(--mono); font-size:13px; font-weight:700; letter-spacing:0.10em;
+          color:${C.text}; background:linear-gradient(180deg, #f5f7fa, #d9dee6); color:#0c131a;
+          border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:3px 10px;
+        }
+        .g-vehicle-sub{font-size:11.5px; color:${C.textDim}; margin-top:5px; font-family:var(--mono);}
+        .g-vehicle-specs{font-size:11px; color:${C.textDimmer}; font-family:var(--mono); border:1px dashed ${C.border}; border-radius:10px; padding:6px 10px;}
+        .g-vehicle-blocks{display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:12px;}
+        .g-vehicle-block{
+          border:1px solid ${C.border}; border-radius:12px; padding:13px 14px;
+          background:rgba(255,255,255,0.02); display:flex; flex-direction:column; gap:4px;
+        }
+        .g-vehicle-block-label{display:flex; align-items:center; gap:8px; font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:${C.textDimmer}; font-family:var(--mono);}
+        .g-vehicle-chip{border:1px solid; border-radius:8px; padding:0 6px; font-size:9px; letter-spacing:.05em; text-transform:uppercase; font-weight:700;}
+        .g-vehicle-value{font-size:24px; font-weight:700; color:${C.text}; letter-spacing:-0.02em; font-family:var(--display), sans-serif;}
+        .g-vehicle-block-main{font-size:13.5px; font-weight:600; color:${C.text};}
+        .g-vehicle-block-sub{font-size:11px; color:${C.textDimmer}; line-height:1.55;}
+        .g-progress{height:5px; border-radius:99px; background:rgba(255,255,255,0.08); overflow:hidden; margin-top:6px;}
+        .g-progress i{display:block; height:100%; border-radius:99px;}
+        .g-vehicle-reminders{
+          display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+          border-top:1px dashed ${C.borderSoft}; padding-top:12px;
+        }
+        .g-vehicle-reminder-title{font-size:10.5px; font-family:var(--mono); letter-spacing:.06em; text-transform:uppercase; color:${C.textDimmer};}
+        .g-vehicle-reminder{display:inline-flex; align-items:center; gap:6px; font-size:12px;}
         .g-map-grid{
           position:relative; width:100%; min-height:400px; background:${C.bg2};
           border:1px solid ${C.border};
@@ -4647,6 +5323,13 @@ export default function GridPulseApp() {
           font-size:9.5px; letter-spacing:.08em; color:#052e1a; background:${C.green};
           border-radius:10px; padding:2px 7px; font-family:var(--mono); font-weight:600;
         }
+        .g-live-mini{
+          display:inline-block; margin-left:6px; vertical-align:middle;
+          font-size:8.5px; letter-spacing:.1em; color:#052e1a; background:${C.green};
+          border-radius:8px; padding:1px 6px; font-family:var(--mono); font-weight:700;
+          animation:g-blink 1.6s ease-in-out infinite;
+        }
+        @keyframes g-blink{0%,100%{opacity:1;}50%{opacity:.45;}}
         .g-route-note{
           display:inline-block; margin-left:6px; vertical-align:middle;
           font-size:8.5px; letter-spacing:.1em; color:${C.cyan};
@@ -4938,7 +5621,7 @@ export default function GridPulseApp() {
           <TopBar 
             name={session.name} 
             role={session.role} 
-            onLogout={() => setSession(null)}
+            onLogout={() => setShowLogoutModal(true)}
             notifications={notifications}
             onDismissNotification={handleDismissNotification}
             onMarkNotificationRead={handleMarkNotificationRead}
@@ -4950,6 +5633,36 @@ export default function GridPulseApp() {
             : <OwnerDashboard name={session.name} preferences={preferences} setPreferences={setPreferences} />}
           <HelpModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} />
         </>
+      )}
+
+      {showLogoutModal && (
+        <div className="g-modal-overlay" onClick={() => setShowLogoutModal(false)}>
+          <div className="g-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="g-modal-header">
+              <h2 className="g-modal-title">Log out of GRIDPULSE?</h2>
+              <button className="g-btn-ghost" onClick={() => setShowLogoutModal(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="g-modal-body">
+              <div className="g-logout-note">
+                <ShieldAlert size={16} style={{ color: C.amber, flexShrink: 0, marginTop: 2 }} />
+                <span>
+                  Doing this <b>logs you out</b> and clears this signed-in session on this device.
+                  Reloading the page keeps you signed in — only this action ends your session.
+                </span>
+              </div>
+              <div className="g-modal-actions">
+                <button type="button" className="g-btn-ghost" onClick={() => setShowLogoutModal(false)}>
+                  <X size={13} /> Cancel
+                </button>
+                <button type="button" className="g-btn-primary g-btn-danger" onClick={confirmLogout}>
+                  <LogOut size={13} /> Log out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
