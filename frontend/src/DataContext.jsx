@@ -26,6 +26,8 @@ export function AppDataProvider({ children }) {
   // `live` carries the merged protocol snapshot (sources, stations, anpr, ...).
   const [live, setLive] = useState(null);
   const [liveConnected, setLiveConnected] = useState(false);
+  // Dynamic USD -> INR market rate (fed from the live snapshot / /api/fx).
+  const [fxRate, setFxRate] = useState(83);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +55,9 @@ export function AppDataProvider({ children }) {
       if (cancelled || !snap || typeof snap !== "object") return;
       setLiveConnected(true);
       setLive(snap);
+      if (snap.fx && Number.isFinite(snap.fx.usdToInr) && snap.fx.usdToInr > 0) {
+        setFxRate(snap.fx.usdToInr);
+      }
     };
 
     const onFinalFailure = () => {
@@ -62,6 +67,14 @@ export function AppDataProvider({ children }) {
       }, 10000);
       pollTimer.unref?.();
     };
+
+    // Keep the dynamic USD->INR market rate fresh (also arrives inside live snapshots).
+    const refreshFx = () => api.getFx().then((d) => {
+      if (!cancelled && d && Number.isFinite(d.usdToInr) && d.usdToInr > 0) setFxRate(d.usdToInr);
+    }).catch(() => {});
+    refreshFx();
+    const fxTimer = setInterval(refreshFx, 60 * 60 * 1000);
+    fxTimer.unref?.();
 
     const openStream = () => {
       try {
@@ -94,13 +107,14 @@ export function AppDataProvider({ children }) {
       cancelled = true;
       clearTimeout(failGuard);
       if (pollTimer) clearInterval(pollTimer);
+      if (fxTimer) clearInterval(fxTimer);
       if (es) es.close();
     };
   }, []);
 
   const value = useMemo(
-    () => ({ driver, owner, live, liveConnected, loading, error }),
-    [driver, owner, live, liveConnected, loading, error]
+    () => ({ driver, owner, live, liveConnected, fxRate, loading, error }),
+    [driver, owner, live, liveConnected, fxRate, loading, error]
   );
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
@@ -124,6 +138,6 @@ export function useOwnerData() {
 }
 
 export function useLiveData() {
-  const { live, liveConnected } = useAppData();
-  return { live, liveConnected };
+  const { live, liveConnected, fxRate } = useAppData();
+  return { live, liveConnected, fxRate };
 }

@@ -11,7 +11,8 @@ import {
   ArrowUpRight, ArrowDownRight, BatteryCharging, Bell, ShieldOff,
   CloudRain, CloudSun, Droplets, Thermometer, Eye, CreditCard, Wallet, Users, Target, Fuel,
   Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu,
-  LocateFixed, RefreshCw, Navigation, FileText, Upload, ShieldCheck, BadgeCheck, CalendarDays, ArrowUpDown
+  LocateFixed, RefreshCw, Navigation, FileText, Upload, ShieldCheck, BadgeCheck, CalendarDays, ArrowUpDown,
+  Sun, Moon
 } from "lucide-react";
 
 import { C, STATUS_COLOR, CONFIDENCE_COLOR } from "./theme.js";
@@ -287,7 +288,7 @@ const IN_CHARGERS = [
 ];
 
 /* ---- Trip planner: greedy stop selection along the straight-line route ---- */
-function planEVRoadTrip({ origin, destination, stationList, vehicleSpec, startSoc = 85 }) {
+function planEVRoadTrip({ origin, destination, stationList, vehicleSpec, startSoc = 85, fxRate = 83 }) {
   const usable = parseFloat(vehicleSpec?.usable) || 38;
   const effRangeKm = parseFloat(vehicleSpec?.range) || 400;
   const acKw = parseFloat(vehicleSpec?.ac) || 7.2;
@@ -304,13 +305,17 @@ function planEVRoadTrip({ origin, destination, stationList, vehicleSpec, startSo
   const stops = [];
   let traveled = 0;
   let leg = 0;
+  let lastId = null;
+  let guard = 0;
   while (traveled < totalKm) {
+    if (++guard > 120) break; // hard safety cap so the planner can never hang
     leg += 1;
     const nextTarget = traveled + stopEveryKm;
     const pick = orderedStations
-      .filter((s) => s.km >= traveled && s.km <= nextTarget * 1.8)
+      .filter((s) => s.km > traveled && s.km <= nextTarget * 1.8 && s.id !== lastId)
       .find((s) => s.toDest < totalKm - traveled + 5);
     if (!pick) break;
+    lastId = pick.id;
     const legDist = pick.km - traveled;
     const needSoc = 100 * (legDist / effRangeKm) + bufferPct * 100;
     stops.push({
@@ -333,8 +338,8 @@ function planEVRoadTrip({ origin, destination, stationList, vehicleSpec, startSo
   const totalStops = stops.length;
   const estDriving = Math.round((totalKm / 78) * 60);
   const estCharging = stops.reduce((n, s) => n + Math.round((s.chargeAt / 100 * usable / dcKw) * 60), 0);
-  const costKwh = usdPerKwhFrom(vehicleSpec?.model);
-  const estCost = Math.round(stops.reduce((n, s) => n + (s.chargeAt - 15) / 100 * usable, 0) * costKwh * 100) / 100;
+  const costKwh = inrPerKwhFrom(vehicleSpec?.model, fxRate);
+  const estCost = Math.round(stops.reduce((n, s) => n + (s.chargeAt - 15) / 100 * usable, 0) * costKwh);
   return {
     totalKm: Math.round(totalKm),
     directDriveMins: Math.round((totalKm / 78) * 60),
@@ -344,7 +349,7 @@ function planEVRoadTrip({ origin, destination, stationList, vehicleSpec, startSo
     estChargingMins: estCharging,
     estTotalMins: estDriving + estCharging,
     estCost,
-    costKwh,
+    costKwh: Math.round(costKwh),
     usable,
     effRangeKm,
   };
@@ -355,6 +360,14 @@ function usdPerKwhFrom(model) {
   if (/premium|lux|porsche|bmw|mercedes|audi|taycan|macan|i[457ix]|EQB|EQE|EQS|taycan/i.test(v)) return 0.26;
   if (/ioniq|ev6|ev9|volvo|tesla|seal|ex30|ex40|model|atto/i.test(v)) return 0.22;
   return 0.18;
+}
+
+/* Average public DC fast-charge tariff in Indian rupees per kWh. Starts from
+   the USD tariff model then converts using the live USD->INR market rate so
+   pricing tracks the market. Falls back to ₹83 if FX hasn't loaded yet. */
+function inrPerKwhFrom(model, fxRate = 83) {
+  const f = Number.isFinite(fxRate) && fxRate > 0 ? fxRate : 83;
+  return Math.round(usdPerKwhFrom(model) * f);
 }
 
 
@@ -2281,12 +2294,31 @@ function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalCharger
     let map;
     try {
       map = L.map(el, { zoomControl: true, attributionControl: false });
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      const carto = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
         subdomains: "abcd",
         maxZoom: 19,
         detectRetina: true,
-      }).addTo(map);
+      });
+      let base = carto;
+      base.addTo(map);
+      // If CARTO tiles fail to load (e.g. 401 / "API key required" / throttled),
+      // fall back to the keyless standard OpenStreetMap tile service.
+      base.on("tileerror", (ev) => {
+        if (base !== carto) return;
+        try {
+          const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19,
+            detectRetina: false,
+          });
+          carto.remove();
+          osm.addTo(map);
+          base = osm;
+        } catch {
+          /* keep whatever tiles are available */
+        }
+      });
       L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
       layerRef.current = L.layerGroup().addTo(map);
       mapRef.current = map;
@@ -2416,22 +2448,26 @@ function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalCharger
 
 function DriverChargersPage({ preferences }) {
   const { nearbyChargers, vehicleName } = useDriverData();
-  const { live } = useLiveData();
+  const { live, fxRate } = useLiveData();
   const geo = useGeolocation();
   const [selectedCharger, setSelectedCharger] = useState(null);
   const [viewMode, setViewMode] = useState("list");
   const [filterStatus, setFilterStatus] = useState("all");
   const [proximity, setProximity] = useState("any");
   const [nationalChargers] = useState(() =>
-    IN_CHARGERS.map((c) => ({
-      ...c,
-      status: "available",
-      statusLabel: "Nationwide",
-      connector: c.plugs,
-      price: "0.18",
-      priceLabel: "$0.18/kWh",
-      distance: "Nationwide station",
-    }))
+    IN_CHARGERS.map((c) => {
+      const usdRate = 0.18;
+      const perKwh = preferences.currency === "INR" ? Math.round(usdRate * (fxRate || 83)) : usdRate;
+      return {
+        ...c,
+        status: "available",
+        statusLabel: "Nationwide",
+        connector: c.plugs,
+        price: String(perKwh),
+        priceLabel: `${formatCurrency(perKwh, preferences.currency, preferences.region)}/kWh`,
+        distance: "Nationwide station",
+      };
+    })
   );
   const [tripFrom, setTripFrom] = useState("Vellore");
   const [tripTo, setTripTo] = useState("");
@@ -2440,6 +2476,8 @@ function DriverChargersPage({ preferences }) {
   const [tripPlan, setTripPlan] = useState(null);
   const [tripFocus, setTripFocus] = useState(null);
   const [tripError, setTripError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocus, setSearchFocus] = useState(null);
 
   // Attach a GPS-derived (straight-line) distance when we have a live fix.
   const withDist = useMemo(
@@ -2472,14 +2510,14 @@ function DriverChargersPage({ preferences }) {
     const soc = conns.reduce((m, x) => Math.max(m, x.soC || 0), 0) || null;
     const tempC = conns.reduce((m, x) => Math.max(m, x.tempC || 0), 0) || null;
     const drPct = activeDr?.signalPercent || 0;
-    const priceNow = activeDr && st ? (parseFloat(c.price) || 0.16) * (1 + drPct / 100) : null;
-    const priceLabel = formatRate(c.price, preferences);
-    return {
-      ...c,
-      status: liveSt ? liveSt.status : c.status,
-      statusLabel: liveSt ? liveSt.label : c.status,
-      priceLabel,
-      priceNow: priceNow != null ? `$${priceNow.toFixed(2)}/kWh` : null,
+      const priceNow = activeDr && st ? (parseFloat(c.price) || 0.16) * (1 + drPct / 100) : null;
+      const priceLabel = formatRate(c.price, preferences);
+      return {
+        ...c,
+        status: liveSt ? liveSt.status : c.status,
+        statusLabel: liveSt ? liveSt.label : c.status,
+        priceLabel,
+        priceNow: priceNow != null ? `${formatRate(String(priceNow), preferences)}` : null,
       live: st
         ? {
             online: st.status === "online",
@@ -2543,15 +2581,15 @@ function DriverChargersPage({ preferences }) {
     return [...effective].sort((a, b) => (effKm(a) ?? Infinity) - (effKm(b) ?? Infinity));
   }, [effective, geo.loc, routes]);
 
-  const filteredChargers = ordered
+  const filteredChargers = (locSearch.active ? displayChargers : ordered)
     .filter((charger) => filterStatus === "all" || charger.status === filterStatus)
     .filter((charger) => proximity === "any" || (effKm(charger) != null && effKm(charger) <= Number(proximity)));
 
   const nearest = geo.loc ? [...ordered].filter((c) => effKm(c) != null)[0] : null;
 
-  const mapData = effective.map((charger) => {
+  const mapData = (locSearch.active ? displayChargers : effective).map((charger) => {
     const r = routes[charger.name];
-    const distLabel = r ? formatKm(r.km) : geo.loc && charger.km != null ? formatKm(charger.km) : charger.distance;
+    const distLabel = r ? formatKm(r.km) : geo.loc && charger.km != null ? formatKm(charger.km) : charger.distance || "Nationwide";
     const mins = r ? r.minutes : geo.loc && charger.km != null ? effMins(charger) : null;
     return {
       ...charger,
@@ -2570,6 +2608,55 @@ function DriverChargersPage({ preferences }) {
   }, [nearbyChargers, selectedCharger]);
 
   // What to show for a charger's distance: road → straight-line → static.
+  // Location search: browse chargers anywhere in India by city or state.
+  const locSearch = useMemo(() => {
+    const q = (searchQuery || "").trim().toLowerCase();
+    if (!q) return { results: [], active: false, label: "" };
+    const byCity = new Map();
+    nationalChargers.forEach((c) => {
+      if (!byCity.has(c.city)) byCity.set(c.city, []);
+      byCity.get(c.city).push(c);
+    });
+    const cityMatches = (c) =>
+      c.city?.toLowerCase().includes(q) || c.state?.toLowerCase().includes(q);
+    // Set focus to the first matching city's centroid for the map.
+    const results = nationalChargers.filter(cityMatches);
+    let label = "";
+    if (results.length) {
+      const city = results[0].city;
+      const st = results[0].state;
+      const inCity = IN_CITIES[city] || IN_CITIES[st];
+      label = `${results.length} station${results.length === 1 ? "" : "s"} in ${city}, ${st}`;
+    }
+    return { results, active: results.length > 0, label };
+  }, [searchQuery, nationalChargers]);
+
+  // City → depends on each charger's coords being inside the city box.
+  useEffect(() => {
+    if (!locSearch.active || !locSearch.results.length) {
+      setSearchFocus(null);
+      return;
+    }
+    const first = locSearch.results[0];
+    const cityMeta = IN_CITIES[first.city] || IN_CITIES[first.state];
+    setSearchFocus({
+      center: cityMeta ? { lat: cityMeta.lat, lng: cityMeta.lng } : { lat: first.lat, lng: first.lng },
+      zoom: 11,
+    });
+  }, [locSearch.active, locSearch.results]);
+
+  const locationResults = locSearch.active ? locSearch.results : [];
+
+  // Build a combined dataset for list/map: local chargers plus any search hits.
+  const displayChargers = useMemo(() => {
+    if (!locSearch.active) return effective;
+    const ids = new Set(locationResults.map((c) => c.id));
+    // Merge matching national chargers in, excluding any local dup by name.
+    const merged = [...effective.filter((c) => !ids.has(c.id))];
+    locationResults.forEach((c) => merged.push(c));
+    return merged;
+  }, [effective, locSearch.active, locationResults]);
+
   const distMeta = (c) => {
     const r = routes[c.name];
     if (r) return { label: formatKm(r.km), mins: r.minutes, note: "road" };
@@ -2622,6 +2709,7 @@ function DriverChargersPage({ preferences }) {
       stationList: IN_CHARGERS,
       vehicleSpec: { usable: "40", range: String(tripRangeKm), ac: "7.2", dc: "60", model: vehicleName },
       startSoc: tripStartSoc,
+      fxRate,
     });
     setTripPlan(plan);
     setViewMode("map");
@@ -2639,6 +2727,40 @@ function DriverChargersPage({ preferences }) {
         <h2>Find chargers</h2>
         <p>Stations near you, with live status and pricing.</p>
       </div>
+
+      <Card title="Search chargers anywhere in India" icon={Search} style={{ marginBottom: 16 }}>
+        <div className="g-locsearch-row">
+          <div className="g-locsearch-input">
+            <Search size={15} style={{ color: C.textDimmer }} />
+            <input
+              list="loc-cities"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Try Powai, Mumbai, Delhi NCR, Bengaluru, Pune, Hyderabad…"
+            />
+            {searchQuery && (
+              <button type="button" className="g-btn-ghost g-locsearch-clear" onClick={() => { setSearchQuery(""); setSearchFocus(null); }}>
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <datalist id="loc-cities">
+            {Object.keys(IN_CITIES).map((c) => <option key={c} value={c} />)}
+            {[...new Set(IN_CHARGERS.map((c) => c.state))].map((s) => <option key={s} value={s} />)}
+          </datalist>
+        </div>
+        {searchQuery && (
+          <div className="g-locsearch-meta">
+            {locSearch.active ? (
+              <span className="g-locsearch-ok">
+                <MapPin size={13} style={{ color: C.cyan }} /> {locSearch.label} — showing on the list &amp; map.
+              </span>
+            ) : (
+              <span className="g-locsearch-empty">No chargers found for "{searchQuery.trim()}". Try another city or state (e.g. Mumbai, Delhi, Tamil Nadu, Kerala).</span>
+            )}
+          </div>
+        )}
+      </Card>
 
       <Card title="GPS connectivity" icon={LocateFixed} style={{ marginBottom: 16 }}>
         <div className="g-gps-row">
@@ -2833,7 +2955,7 @@ function DriverChargersPage({ preferences }) {
                   <div className="g-trip-stat"><span className="g-trip-stat-v">{tripPlan.totalStops}</span><span className="g-trip-stat-l">charging stops</span></div>
                   <div className="g-trip-stat"><span className="g-trip-stat-v">{formatDuration(tripPlan.estTotalMins / 60)}</span><span className="g-trip-stat-l">est. total</span></div>
                   <div className="g-trip-stat"><span className="g-trip-stat-v">{tripPlan.estChargingMins}m</span><span className="g-trip-stat-l">charging</span></div>
-                  <div className="g-trip-stat"><span className="g-trip-stat-v">${tripPlan.estCost.toFixed(2)}</span><span className="g-trip-stat-l">est. cost</span></div>
+                  <div className="g-trip-stat"><span className="g-trip-stat-v">{formatCurrency(tripPlan.estCost, preferences.currency, preferences.region)}</span><span className="g-trip-stat-l">est. cost</span></div>
                 </div>
                 {tripPlan.stops.length ? (
                   <div className="g-trip-stops">
@@ -2874,12 +2996,12 @@ function DriverChargersPage({ preferences }) {
 
       {viewMode === "list" ? (
         <div className="g-grid" style={{ gridTemplateColumns: "1fr" }}>
-          <Card title="Nearby chargers" icon={MapPin}>
+          <Card title={locSearch.active ? `Chargers at ${searchQuery.trim()}` : "Nearby chargers"} icon={MapPin}>
             <div className="g-list">
               {filteredChargers.length === 0 ? (
                 <div className="g-notification-empty" style={{ padding: 26 }}>
                   <MapPin size={20} style={{ color: C.textDimmer }} />
-                  <span>No chargers match these filters.</span>
+                  <span>{locSearch.active ? `No chargers found at "${searchQuery.trim()}".` : "No chargers match these filters."}</span>
                 </div>
               ) : (
                 filteredChargers.map((c) => {
@@ -2946,7 +3068,7 @@ function DriverChargersPage({ preferences }) {
                   selectedName={selectedCharger?.name || null}
                   onSelect={setSelectedCharger}
                   nationalChargers={nationalChargers}
-                  focusBounds={tripFocus}
+                  focusBounds={tripFocus || searchFocus}
                 />
                 {selectedCharger && (
                 <div className="g-map-details">
@@ -3051,6 +3173,7 @@ function formatDuration(hoursFloat) {
 
 function DriverChargePlannerPage({ preferences }) {
   const { currentSoc, vehicleName, vehicleBatteryKwh, chargeProfiles } = useDriverData();
+  const { fxRate } = useLiveData();
   const [leaveTime, setLeaveTime] = useState("07:30");
   const [targetSoc, setTargetSoc] = useState(80);
   const [profileKey, setProfileKey] = useState("balanced");
@@ -3080,14 +3203,38 @@ function DriverChargePlannerPage({ preferences }) {
     const timeNeededHours = energyNeeded > 0 ? energyNeeded / powerKw : 0;
     const completion = new Date(now.getTime() + timeNeededHours * 3600000);
     const meetsDeadline = completion <= leaveDate;
-    const cost = energyNeeded * profile.rate;
+    // profile.rate is quoted in USD/kWh on the backend; convert to the user's
+    // currency so the estimate reflects their region (INR uses live FX rate).
+    const ratePerKwh = preferences.currency === "INR"
+      ? Math.round((profile.rate || 0.16) * (fxRate || 83))
+      : profile.rate;
+    const cost = energyNeeded * ratePerKwh;
     const gentleFeasible = requiredSteadyPower <= chargeProfiles[2].maxPowerKw;
+
+    // Off-peak guidance: TOU tariffs are cheapest 10 PM - 6 AM (~25% below standard).
+    const offPeakStart = 22;
+    const offPeakEnd = 6;
+    const startH = now.getHours() + now.getMinutes() / 60;
+    const endH = completion.getHours() + completion.getMinutes() / 60;
+    let inOffPeakH = 0;
+    if (endH <= offPeakEnd) inOffPeakH = endH - Math.max(offPeakStart <= startH ? startH : offPeakStart, 0) + (startH > offPeakEnd && startH < offPeakEnd ? 0 : (startH >= offPeakStart ? 0 : offPeakEnd - startH));
+    else if (startH >= offPeakStart || startH < offPeakEnd) {
+      const left = startH < offPeakEnd ? Math.min(offPeakEnd, endH) - startH : offPeakEnd;
+      const right = startH >= offPeakStart ? (endH < offPeakEnd ? 0 : Math.max(0, Math.min(endH, 24) - offPeakStart)) : 0;
+      inOffPeakH = left + right;
+    }
+    const offPeakDisc = 0.25;
+    const peakCost = energyNeeded * ratePerKwh;
+    const offPeakCost = energyNeeded * ratePerKwh * (1 - offPeakDisc) * Math.min(1, timeNeededHours > 0 ? inOffPeakH / timeNeededHours : 0);
+    const savings = Math.max(0, peakCost - offPeakCost);
 
     return {
       now, leaveDate, hoursAvailable, energyNeeded, powerKw, timeNeededHours,
-      completion, meetsDeadline, cost, gentleFeasible,
+      completion, meetsDeadline, cost, ratePerKwh, gentleFeasible,
+      offPeakHours: Math.round(inOffPeakH * 10) / 10,
+      offPeakSavings: savings,
     };
-  }, [leaveTime, targetSoc, profileKey, profile]);
+  }, [leaveTime, targetSoc, profileKey, profile, preferences.currency, preferences.region, fxRate]);
 
   const alreadyThere = plan.energyNeeded <= 0;
 
@@ -3267,6 +3414,29 @@ function DriverChargePlannerPage({ preferences }) {
                   <span>You've got {formatDuration(plan.hoursAvailable - plan.timeNeededHours)} of buffer before you need to leave.</span>
                 </div>
               )}
+
+              <div className="g-schedule-timeline" style={{ marginTop: 16 }}>
+                <div className="g-schedule-seg" style={{ flex: Math.max(0.1, plan.timeNeededHours), background: "rgba(2,222,255,0.18)", borderColor: C.cyan }}>
+                  <span style={{ color: C.cyan }}>
+                    {plan.now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                  <span style={{ color: C.textDim, fontSize: 11 }}>start charging</span>
+                </div>
+                <div className="g-schedule-seg" style={{ flex: Math.max(0.1, plan.hoursAvailable - plan.timeNeededHours), background: "rgba(44,225,160,0.14)", borderColor: C.green }}>
+                  <span style={{ color: profile.stressColor }}>{profile.title}</span>
+                  <span style={{ color: C.textDim, fontSize: 11 }}>{formatDuration(plan.timeNeededHours)}</span>
+                </div>
+              </div>
+
+              {plan.offPeakHours > 0.15 && (
+                <div className="g-insight" style={{ marginTop: 12 }}>
+                  <Moon size={14} style={{ color: C.green, flexShrink: 0, marginTop: 2 }} />
+                  <span>
+                    {plan.offPeakHours.toFixed(1)}h of this charge falls in the off-peak window (10 PM – 6 AM) —
+                    you'd save ~{formatCurrency(plan.offPeakSavings, preferences.currency, preferences.region)} vs. peak-hour rates.
+                  </span>
+                </div>
+              )}
             </>
           )}
         </Card>
@@ -3355,18 +3525,47 @@ function DriverSettingsPage({ preferences, setPreferences }) {
   );
 }
 
-function DriverAnalyticsPage({ onNavigate }) {
+function DriverAnalyticsPage({ onNavigate, preferences }) {
   const { driverBatteryHealth, driverWeeklyExtras } = useDriverData();
+  const { live, liveConnected, fxRate } = useLiveData();
   const [expandedInsight, setExpandedInsight] = useState(null);
   const [dismissedInsights, setDismissedInsights] = useState([]);
   const [actionMessage, setActionMessage] = useState("");
-  
-  const predictions = [
-    { metric: "Battery degradation (6mo)", current: "94.8%", predicted: "94.2%", trend: "down", confidence: "high" },
-    { metric: "Charging cost efficiency", current: "$0.18/kWh", predicted: "$0.17/kWh", trend: "up", confidence: "medium" },
-    { metric: "Range impact (summer)", current: "-4%", predicted: "-6%", trend: "down", confidence: "high" },
-    { metric: "Optimal charging windows", current: "2-3 slots/week", predicted: "4-5 slots/week", trend: "up", confidence: "medium" },
-  ];
+
+  // Live protocol signals feeding the predictions (OCPP, MODBUS, V2G, VOLTTRON, ANPR).
+  const liveSignals = useMemo(() => {
+    const s = live || {};
+    const stations = s.stations || [];
+    const activeSessions = (s.activeSessions || []).length;
+    const ocppStations = stations.filter((st) => /ocpp/i.test(st.protocol || st.vendor || "")).length;
+    const grid = s.modbus || {};
+    const gridRegs = grid.registers || [];
+    const gridPct = gridRegs.length ? Math.round(gridRegs.reduce((n, r) => n + (r.value || 0), 0) / gridRegs.length) : null;
+    return {
+      connected: liveConnected,
+      activeSessions,
+      ocppStations,
+      modbusStations: stations.length,
+      modbusConnected: !!grid.connected,
+      gridPct: gridPct != null ? Math.min(100, Math.max(0, gridPct)) : null,
+      v2gEvents: (s.v2g || []).length,
+      volttronSites: (s.volttron || []).length,
+      anprEvents: (s.anpr?.events || []).length,
+      sources: s.sources || {},
+    };
+  }, [live, liveConnected]);
+
+  const predictions = useMemo(() => {
+    const perKwhUsd = 0.18;
+    const perKwh = preferences.currency === "INR" ? perKwhUsd * (fxRate || 83) : perKwhUsd;
+    const f = (v) => `${formatCurrency(v, preferences.currency, preferences.region)}/kWh`;
+    return [
+      { metric: "Battery degradation (6mo)", current: "94.8%", predicted: "94.2%", trend: "down", confidence: "high" },
+      { metric: "Charging cost efficiency", current: f(perKwh), predicted: f(perKwh * 0.94), trend: "up", confidence: "medium" },
+      { metric: "Range impact (summer)", current: "-4%", predicted: "-6%", trend: "down", confidence: "high" },
+      { metric: "Optimal charging windows", current: "2-3 slots/week", predicted: "4-5 slots/week", trend: "up", confidence: "medium" },
+    ];
+  }, [fxRate, preferences.currency, preferences.region]);
 
   const insights = [
     { 
@@ -3482,7 +3681,15 @@ function DriverAnalyticsPage({ onNavigate }) {
         <Kpi label="Prediction accuracy" value="94%" sub="Based on 6 months of data" icon={Target} accent={C.green} />
         <Kpi label="Data points analyzed" value="2.4M" sub="Sessions, weather, grid patterns" icon={Activity} />
         <Kpi label="Model confidence" value="High" sub="Current predictions" icon={CheckCircle2} accent={C.green} />
-        <Kpi label="Last updated" value="2h ago" sub="Predictions refresh every 6h" icon={Clock} />
+        <Kpi label="Live feed" value={liveConnected ? "Connected" : "Offline"} sub="OCPP · MODBUS · V2G · VOLTTRON · ANPR" icon={Radio} accent={liveConnected ? C.green : C.amber} />
+      </div>
+
+      <div className="g-grid g-grid-5" style={{ marginTop: 16 }}>
+        <div className="g-sig"><span className="g-sig-v">{liveSignals.activeSessions}</span><span className="g-sig-l">OCPP sessions</span></div>
+        <div className="g-sig"><span className="g-sig-v">{liveSignals.ocppStations}</span><span className="g-sig-l">Stations</span></div>
+        <div className="g-sig"><span className="g-sig-v">{liveSignals.gridPct != null ? `${liveSignals.gridPct}%` : "—"}</span><span className="g-sig-l">Grid load (MODBUS)</span></div>
+        <div className="g-sig"><span className="g-sig-v">{liveSignals.v2gEvents}</span><span className="g-sig-l">V2G events</span></div>
+        <div className="g-sig"><span className="g-sig-v">{liveSignals.volttronSites}</span><span className="g-sig-l">VOLTTRON sites</span></div>
       </div>
 
       <div className="g-grid g-grid-2" style={{ marginTop: 18 }}>
@@ -3744,7 +3951,7 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
         {page === "history" && <DriverHistoryPage preferences={preferences} />}
         {page === "battery" && <DriverBatteryPage vehicleProfile={vehicleProfile} />}
         {page === "chargers" && <DriverChargersPage preferences={preferences} />}
-        {page === "analytics" && <DriverAnalyticsPage onNavigate={setPage} />}
+        {page === "analytics" && <DriverAnalyticsPage onNavigate={setPage} preferences={preferences} />}
         {page === "settings" && <DriverSettingsPage preferences={preferences} setPreferences={setPreferences} />}
       </main>
     </div>
@@ -6194,6 +6401,8 @@ export default function GridPulseApp() {
         .g-schedule-item:last-child{border-bottom:none;}
         .g-schedule-label{font-size:12px; color:${C.textDim};}
         .g-schedule-value{font-size:13px; font-weight:600; color:${C.text}; font-family:var(--mono);}
+        .g-schedule-timeline{display:flex; gap:6px; align-items:stretch;}
+        .g-schedule-seg{display:flex; flex-direction:column; justify-content:center; gap:2px; padding:8px 10px; border:1px solid; border-radius:10px; min-width:70px;}
 
         /* ---- predictions ---- */
         .g-predictions-list{display:flex; flex-direction:column; gap:8px;}
@@ -6591,7 +6800,19 @@ export default function GridPulseApp() {
         .g-grid-2{grid-template-columns:repeat(2,1fr);}
         .g-grid-3{grid-template-columns:repeat(3,1fr);}
         .g-grid-4{grid-template-columns:repeat(4,1fr);}
-        @media(max-width:920px){ .g-grid-2,.g-grid-3,.g-grid-4{grid-template-columns:1fr;} .g-grid [style*="span 2"]{grid-column:span 1 !important;} }
+        .g-grid-5{grid-template-columns:repeat(5,1fr);}
+        @media(max-width:920px){ .g-grid-2,.g-grid-3,.g-grid-4,.g-grid-5{grid-template-columns:1fr;} .g-grid [style*="span 2"]{grid-column:span 1 !important;} }
+        .g-sig{display:flex; flex-direction:column; gap:2px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid ${C.border}; border-radius:12px;}
+        .g-sig-v{font-size:20px; font-weight:700; color:${C.text}; font-family:var(--mono);}
+        .g-sig-l{font-size:11px; color:${C.textDim};}
+        .g-locsearch-row{display:flex; align-items:center; gap:10px;}
+        .g-locsearch-input{display:flex; align-items:center; gap:8px; flex:1; padding:0 12px; border:1px solid ${C.border}; border-radius:10px; background:rgba(255,255,255,0.02);}
+        .g-locsearch-input input{flex:1; background:transparent; border:none; outline:none; color:${C.text}; padding:11px 0; font-size:13.5px;}
+        .g-locsearch-input input::placeholder{color:${C.textDimmer};}
+        .g-locsearch-clear{border:none; background:transparent; color:${C.textDimmer}; cursor:pointer; display:flex;}
+        .g-locsearch-meta{margin-top:10px; display:flex; align-items:center; gap:8px; font-size:12.5px;}
+        .g-locsearch-ok{display:flex; align-items:center; gap:7px; color:${C.cyan};}
+        .g-locsearch-empty{color:${C.amber};}
 
         .g-card{
           background:${C.panel}; border:1px solid ${C.border}; border-radius:16px;

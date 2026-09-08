@@ -6,6 +6,8 @@
 
 const { EventEmitter } = require("events");
 
+const fx = require("./fx");
+
 const RATE_PER_KWH = 0.16; // $/kWh used to estimate live session cost
 const MAX_METER_POINTS = 60;
 
@@ -347,6 +349,7 @@ class LiveHub extends EventEmitter {
     return {
       mode: "live",
       time: new Date().toISOString(),
+      fx: { usdToInr: fx.fromUsdToInr() },
       sources: this.sources,
       summary: {
         stationsOnline: [...this.stations.values()].filter((s) => s.status === "online").length,

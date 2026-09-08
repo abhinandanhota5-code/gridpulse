@@ -8,6 +8,7 @@ const { registerAnpr } = require("./anpr");
 const { registerModbus } = require("./modbus");
 const { registerOpenAdr } = require("./openadr");
 const { buildDriverData, buildOwnerData } = require("./merge");
+const fx = require("./fx");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -52,6 +53,12 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/live", (_req, res) => {
   res.json(live.snapshot());
+});
+
+/* Dynamic market FX rate (USD -> INR, cached, with fallback). */
+app.get("/api/fx", async (_req, res) => {
+  const fxState = await fx.get();
+  res.json({ usdToInr: fxState.rate, source: fxState.source, fetchedAt: fxState.fetchedAt || null });
 });
 
 app.get("/api/stream", (req, res) => {

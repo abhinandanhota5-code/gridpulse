@@ -26,6 +26,7 @@ export const api = {
   getDriverData: () => request("/api/driver"),
   getOwnerData: () => request("/api/owner"),
   getLive: () => request("/api/live"),
+  getFx: () => request("/api/fx"),
   getAnpr: () => request("/api/anpr"),
   postPlateEvent: (plateEvent) =>
     request("/api/v1/plate-events", {
