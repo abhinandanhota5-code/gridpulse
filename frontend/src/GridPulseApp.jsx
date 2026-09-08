@@ -3165,7 +3165,7 @@ function formatDuration(hoursFloat) {
 
 function DriverChargePlannerPage({ preferences }) {
   const { currentSoc, vehicleName, vehicleBatteryKwh, chargeProfiles } = useDriverData();
-  const { fxRate } = useLiveData();
+  const { fxRate, live, liveConnected } = useLiveData();
   const [leaveTime, setLeaveTime] = useState("07:30");
   const [targetSoc, setTargetSoc] = useState(80);
   const [profileKey, setProfileKey] = useState("balanced");
@@ -3220,13 +3220,29 @@ function DriverChargePlannerPage({ preferences }) {
     const offPeakCost = energyNeeded * ratePerKwh * (1 - offPeakDisc) * Math.min(1, timeNeededHours > 0 ? inOffPeakH / timeNeededHours : 0);
     const savings = Math.max(0, peakCost - offPeakCost);
 
+    // Smart-charging insight: use the live grid load (MODBUS) + OpenADR signal to
+    // recommend the cheapest / greenest window to start charging.
+    const grid = live?.modbus || {};
+    const regs = (grid.registers || []).reduce((m, r) => { m[r.key] = r.value; return m; }, {});
+    const gridLoadKw = typeof regs.grid_load_kw === "number" ? regs.grid_load_kw : null;
+    const solarKw = typeof regs.solar_kw === "number" ? regs.solar_kw : null;
+    const drActive = (live?.drEvents || []).some((e) => !e.cancelled && new Date(e.endAt) > Date.now());
+    const gridBusy = gridLoadKw != null && gridLoadKw > 0.55 * 600; // >55% of contracted capacity
+
     return {
       now, leaveDate, hoursAvailable, energyNeeded, powerKw, timeNeededHours,
       completion, meetsDeadline, cost, ratePerKwh, gentleFeasible,
       offPeakHours: Math.round(inOffPeakH * 10) / 10,
       offPeakSavings: savings,
+      // smart-charging extras
+      gridLoadKw, solarKw, gridBusy, drActive, liveConnected,
+      solarShare: gridLoadKw != null && solarKw != null ? Math.round((solarKw / Math.max(gridLoadKw, 1)) * 100) : null,
+      recommended: {
+        peakAvoided: savings,
+        note: null,
+      },
     };
-  }, [leaveTime, targetSoc, profileKey, profile, preferences.currency, preferences.region, fxRate]);
+  }, [leaveTime, targetSoc, profileKey, profile, preferences.currency, preferences.region, fxRate, liveConnected, live]);
 
   const alreadyThere = plan.energyNeeded <= 0;
 
@@ -3429,6 +3445,51 @@ function DriverChargePlannerPage({ preferences }) {
                   </span>
                 </div>
               )}
+
+              <div className="g-cost-break" style={{ marginTop: 16 }}>
+                <div className="g-cost-row">
+                  <span className="g-cost-label">Tariff</span>
+                  <span className="g-cost-value g-mono">{formatCurrency(plan.ratePerKwh, preferences.currency, preferences.region)}/kWh</span>
+                </div>
+                <div className="g-cost-row">
+                  <span className="g-cost-label">Energy</span>
+                  <span className="g-cost-value g-mono">{plan.energyNeeded.toFixed(1)} kWh</span>
+                </div>
+                <div className="g-cost-row">
+                  <span className="g-cost-label">Estimated cost</span>
+                  <span className="g-cost-value g-mono" style={{ color: C.cyan }}>{formatCurrency(plan.cost, preferences.currency, preferences.region)}</span>
+                </div>
+                {plan.offPeakSavings > 0 && (
+                  <div className="g-cost-row">
+                    <span className="g-cost-label" style={{ color: C.green }}>Off-peak saving</span>
+                    <span className="g-cost-value g-mono" style={{ color: C.green }}>−{formatCurrency(plan.offPeakSavings, preferences.currency, preferences.region)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="g-smart-charge" style={{ marginTop: 14 }}>
+                <span className="g-kpi-sub" style={{ margin: 0, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Sun size={13} style={{ color: C.amber }} /> Smart charging · live grid signal
+                </span>
+                {plan.liveConnected ? (
+                  <div className="g-smart-charge-grid">
+                    <div className="g-smart-chip">
+                      <span className="g-smart-chip-l">{plan.gridLoadKw != null ? `Grid ${plan.gridLoadKw.toFixed(0)} kW` : "Grid —"}</span>
+                      {plan.gridBusy ? <Badge status="critical">Busy</Badge> : <Badge status="healthy">Clear</Badge>}
+                    </div>
+                    <div className="g-smart-chip">
+                      <span className="g-smart-chip-l">Solar {plan.solarKw != null ? `${plan.solarKw.toFixed(0)} kW` : "—"}</span>
+                      {plan.solarShare != null && plan.solarShare > 40 ? <Badge status="healthy">Green</Badge> : <Badge status="warning">Low</Badge>}
+                    </div>
+                    <div className="g-smart-chip">
+                      <span className="g-smart-chip-l">Demand response</span>
+                      {plan.drActive ? <Badge status="warning">Active</Badge> : <Badge status="healthy">Idle</Badge>}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="g-kpi-sub" style={{ margin: 0 }}>Grid signal offline — using standard tariff estimate. Reconnect the gateway for a live grid-aware plan.</p>
+                )}
+              </div>
             </>
           )}
         </Card>
@@ -3524,26 +3585,58 @@ function DriverAnalyticsPage({ onNavigate, preferences }) {
   const [dismissedInsights, setDismissedInsights] = useState([]);
   const [actionMessage, setActionMessage] = useState("");
 
-  // Live protocol signals feeding the predictions (OCPP, MODBUS, V2G, VOLTTRON, ANPR).
+  // Live protocol signals feeding the predictions (OCPP, MODBUS, V2G, VOLTTRON, ANPR, OpenADR).
   const liveSignals = useMemo(() => {
     const s = live || {};
     const stations = s.stations || [];
-    const activeSessions = (s.activeSessions || []).length;
+    const sessions = s.activeSessions || [];
+    const activeSessions = sessions.length;
+    const chargingNow = sessions.filter((x) => x.charging || /charging/i.test(x.charger || "") || (x.powerKw > 0)).length;
     const ocppStations = stations.filter((st) => /ocpp/i.test(st.protocol || st.vendor || "")).length;
+    const onlineStations = stations.filter((st) => st.status === "online").length;
     const grid = s.modbus || {};
-    const gridRegs = grid.registers || [];
-    const gridPct = gridRegs.length ? Math.round(gridRegs.reduce((n, r) => n + (r.value || 0), 0) / gridRegs.length) : null;
+    const regs = (grid.registers || []).reduce((m, r) => { m[r.key] = r.value; return m; }, {});
+    const gridLoadKw = typeof regs.grid_load_kw === "number" ? regs.grid_load_kw : null;
+    const solarKw = typeof regs.solar_kw === "number" ? regs.solar_kw : null;
+    const batterySoc = typeof regs.battery_soc === "number" ? Math.round(regs.battery_soc) : null;
+    const siteTemp = typeof regs.site_temp_c === "number" ? regs.site_temp_c : null;
+    const capKw = 600;
+    const gridPct = gridLoadKw != null ? Math.min(100, Math.round((gridLoadKw / capKw) * 100)) : null;
+    const anprEvents = (s.anpr?.events || []).length;
+    const anprMatches = (s.anpr?.matches || []).length;
+    const v2gEvents = (s.v2g || []).length;
+    const drActive = (s.drEvents || []).filter((e) => !e.cancelled && new Date(e.endAt) > Date.now()).length;
+    // Per-plugin source cards (colour + live detail).
+    const feeds = Object.entries(s.sources || {}).map(([k, src]) => ({
+      key: src.key || k,
+      name: src.name || k,
+      protocol: src.protocol || "",
+      status: src.status || "standby",
+      count: src.count || 0,
+      color: src.status === "connected" || src.status === "active"
+        ? C.green
+        : src.status === "connecting" ? C.amber : src.status === "offline" ? C.red : C.textDimmer,
+    }));
     return {
       connected: liveConnected,
       activeSessions,
+      chargingNow,
       ocppStations,
-      modbusStations: stations.length,
+      onlineStations,
       modbusConnected: !!grid.connected,
-      gridPct: gridPct != null ? Math.min(100, Math.max(0, gridPct)) : null,
-      v2gEvents: (s.v2g || []).length,
+      gridLoadKw,
+      solarKw,
+      batterySoc,
+      siteTemp,
+      gridPct,
+      v2gEvents,
+      drActive,
       volttronSites: (s.volttron || []).length,
-      anprEvents: (s.anpr?.events || []).length,
-      sources: s.sources || {},
+      anprEvents,
+      anprMatches,
+      feeds,
+      sessions: sessions.slice(0, 8),
+      lastUpdated: s.time || null,
     };
   }, [live, liveConnected]);
 
@@ -3551,13 +3644,17 @@ function DriverAnalyticsPage({ onNavigate, preferences }) {
     const perKwhUsd = 0.18;
     const perKwh = preferences.currency === "INR" ? perKwhUsd * (fxRate || 83) : perKwhUsd;
     const f = (v) => `${formatCurrency(v, preferences.currency, preferences.region)}/kWh`;
+    const livePct = liveSignals.gridPct;
+    const grid = livePct != null
+      ? { current: `${livePct}%`, predicted: `${Math.min(100, livePct + 9)}%`, trend: "up", confidence: "high" }
+      : { current: "82%", predicted: "91%", trend: "up", confidence: "high" };
     return [
       { metric: "Battery degradation (6mo)", current: "94.8%", predicted: "94.2%", trend: "down", confidence: "high" },
       { metric: "Charging cost efficiency", current: f(perKwh), predicted: f(perKwh * 0.94), trend: "up", confidence: "medium" },
-      { metric: "Range impact (summer)", current: "-4%", predicted: "-6%", trend: "down", confidence: "high" },
+      { metric: livePct != null ? "Grid demand (live MODBUS)" : "Range impact (summer)", current: livePct != null ? grid.current : "-4%", predicted: grid.predicted, trend: grid.trend, confidence: grid.confidence },
       { metric: "Optimal charging windows", current: "2-3 slots/week", predicted: "4-5 slots/week", trend: "up", confidence: "medium" },
     ];
-  }, [fxRate, preferences.currency, preferences.region]);
+  }, [fxRate, preferences.currency, preferences.region, liveSignals.gridPct]);
 
   const insights = [
     { 
@@ -3676,13 +3773,71 @@ function DriverAnalyticsPage({ onNavigate, preferences }) {
         <Kpi label="Live feed" value={liveConnected ? "Connected" : "Offline"} sub="OCPP · MODBUS · V2G · VOLTTRON · ANPR" icon={Radio} accent={liveConnected ? C.green : C.amber} />
       </div>
 
+      {/* Live telemetry strip — real MODBUS + OCPP values */}
       <div className="g-grid g-grid-5" style={{ marginTop: 16 }}>
-        <div className="g-sig"><span className="g-sig-v">{liveSignals.activeSessions}</span><span className="g-sig-l">OCPP sessions</span></div>
-        <div className="g-sig"><span className="g-sig-v">{liveSignals.ocppStations}</span><span className="g-sig-l">Stations</span></div>
-        <div className="g-sig"><span className="g-sig-v">{liveSignals.gridPct != null ? `${liveSignals.gridPct}%` : "—"}</span><span className="g-sig-l">Grid load (MODBUS)</span></div>
-        <div className="g-sig"><span className="g-sig-v">{liveSignals.v2gEvents}</span><span className="g-sig-l">V2G events</span></div>
-        <div className="g-sig"><span className="g-sig-v">{liveSignals.volttronSites}</span><span className="g-sig-l">VOLTTRON sites</span></div>
+        <div className="g-sig">
+          <span className="g-sig-v">
+            {liveSignals.gridLoadKw != null ? `${liveSignals.gridLoadKw.toFixed(0)} kW` : "—"}
+            {liveSignals.gridPct != null && <span className="g-sig-sub"> · {liveSignals.gridPct}% cap</span>}
+          </span>
+          <span className="g-sig-l">Grid load · MODBUS</span>
+        </div>
+        <div className="g-sig">
+          <span className="g-sig-v">{liveSignals.solarKw != null ? `${liveSignals.solarKw.toFixed(0)} kW` : "—"}</span>
+          <span className="g-sig-l">Solar PV · MODBUS</span>
+        </div>
+        <div className="g-sig">
+          <span className="g-sig-v">{liveSignals.batterySoc != null ? `${liveSignals.batterySoc}%` : "—"}</span>
+          <span className="g-sig-l">Storage SoC · MODBUS</span>
+        </div>
+        <div className="g-sig">
+          <span className="g-sig-v">{liveSignals.siteTemp != null ? `${liveSignals.siteTemp.toFixed(0)}°C` : "—"}</span>
+          <span className="g-sig-l">Site temp · MODBUS</span>
+        </div>
+        <div className="g-sig">
+          <span className="g-sig-v">
+            {liveSignals.chargingNow}<span className="g-sig-sub"> / {liveSignals.activeSessions}</span>
+          </span>
+          <span className="g-sig-l">Charging now · OCPP</span>
+        </div>
       </div>
+
+      {/* Live data sources feeding the predictions */}
+      <Card title="Live data sources feeding your predictions" icon={Radio} style={{ marginTop: 16 }}>
+        <div className="g-live-sources">
+          {liveSignals.feeds.length ? (
+            liveSignals.feeds.map((src) => (
+              <div className="g-live-source" key={src.key}>
+                <span className="g-dot" style={{ background: src.color, boxShadow: `0 0 8px ${src.color}99` }} />
+                <div className="g-live-source-main">
+                  <div className="g-live-source-name">{src.name}</div>
+                  <div className="g-live-source-protocol g-mono">{src.protocol}</div>
+                </div>
+                <div className="g-live-source-detail">
+                  <span style={{ color: src.color }}>{src.status}</span>
+                  {src.count > 0 && <span className="g-live-source-count">{src.count}</span>}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="g-live-source" style={{ gridColumn: "1 / -1", justifyContent: "center", color: C.textDimmer }}>
+              Waiting for the protocol gateway to connect…
+            </div>
+          )}
+        </div>
+        {liveSignals.sessions.length > 0 && (
+          <div className="g-live-session-ticker" style={{ marginTop: 12 }}>
+            <span className="g-kpi-sub" style={{ margin: 0, flexShrink: 0 }}>Active OCPP sessions: </span>
+            <div className="g-live-session-chips">
+              {liveSignals.sessions.map((sess, i) => (
+                <span className="g-chip g-chip-live" key={i}>
+                  ⚡ {sess.soc || "—"}% · {sess.powerKw != null ? `${sess.powerKw} kW` : "—"} · {sess.charger}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
 
       <div className="g-grid g-grid-2" style={{ marginTop: 18 }}>
         <Card title="Predictions (6 months)" icon={TrendingUp}>
@@ -4457,6 +4612,23 @@ function OwnerChargingPage({ ocppStatus, ocppProtocol, respondingCount, testOcpp
 
 function OwnerGridPage({ preferences }) {
   const { gridLoad, costSplit, weatherDemandCorrelation, weatherForecast, demandResponseEvents } = useOwnerData();
+  const { live, liveConnected } = useLiveData();
+
+  // Live grid telemetry from MODBUS + OpenADR demand-response signal.
+  const liveGrid = useMemo(() => {
+    const modbus = live?.modbus || {};
+    const regs = (modbus.registers || []).reduce((m, r) => { m[r.key] = r.value; return m; }, {});
+    const loadKw = typeof regs.grid_load_kw === "number" ? regs.grid_load_kw : null;
+    const solarKw = typeof regs.solar_kw === "number" ? regs.solar_kw : null;
+    const batterySoc = typeof regs.battery_soc === "number" ? regs.battery_soc : null;
+    const capacityKw = 600;
+    const headroom = loadKw != null ? capacityKw - loadKw : null;
+    const pct = loadKw != null ? Math.round((loadKw / capacityKw) * 100) : null;
+    const dr = (live?.drEvents || []).filter((e) => !e.cancelled && new Date(e.endAt) > Date.now());
+    const volttronSites = (live?.volttron || []).length;
+    return { loadKw, solarKw, batterySoc, capacityKw, headroom, pct, dr, volttronSites, liveConnected };
+  }, [live, liveConnected]);
+
   return (
     <div className="g-page">
       <div className="g-page-head">
@@ -4464,11 +4636,26 @@ function OwnerGridPage({ preferences }) {
         <p>Demand, capacity headroom, and cost across the network.</p>
       </div>
       <div className="g-grid g-grid-4">
-        <Kpi label="Peak demand today" value="580 kW" sub="of 600 kW contracted" icon={Gauge} accent={C.amber} />
-        <Kpi label="Headroom" value="20 kW" sub="3.3% remaining" icon={Activity} accent={C.red} />
-        <Kpi label="DR events (30d)" value="6" sub={`${formatCurrency(142, preferences.currency, preferences.region)} earned`} icon={Radio} accent={C.green} />
+        <Kpi label={liveGrid.liveConnected ? "Peak demand (live)" : "Peak demand today"} value={liveGrid.liveConnected && liveGrid.loadKw != null ? `${liveGrid.loadKw.toFixed(0)} kW` : "580 kW"} sub={liveGrid.liveConnected && liveGrid.pct != null ? `${100 - liveGrid.pct}% headroom · live MODBUS` : "of 600 kW contracted"} icon={Gauge} accent={liveGrid.liveConnected && liveGrid.pct != null && liveGrid.pct > 85 ? C.red : C.amber} />
+        <Kpi label="Headroom" value={liveGrid.liveConnected && liveGrid.headroom != null ? `${liveGrid.headroom.toFixed(0)} kW` : "20 kW"} sub={liveGrid.liveConnected && liveGrid.loadKw != null ? `${(100 - liveGrid.pct)}% remaining · live` : "3.3% remaining"} icon={Activity} accent={liveGrid.liveConnected && liveGrid.headroom != null && liveGrid.headroom < 60 ? C.red : C.textDim} />
+        <Kpi label="DR events (30d)" value={liveGrid.dr.length} sub={`${formatCurrency(142, preferences.currency, preferences.region)} earned`} icon={Radio} accent={C.green} />
         <Kpi label="Blended cost" value={formatRate(0.14, preferences)} sub="-2¢ vs. last month" icon={DollarSign} trend="down" />
       </div>
+
+      {liveGrid.liveConnected && (
+        <Card title="Live grid telemetry (MODBUS · OpenADR · VOLTTRON)" icon={Radio} style={{ marginTop: 16 }}>
+          <div className="g-smart-charge-grid" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+            <div className="g-smart-chip"><span className="g-smart-chip-l">Grid load</span><span className="g-cost-value g-mono">{liveGrid.loadKw != null ? `${liveGrid.loadKw.toFixed(0)} kW` : "—"}</span></div>
+            <div className="g-smart-chip"><span className="g-smart-chip-l">Solar PV</span><span className="g-cost-value g-mono" style={{ color: C.green }}>{liveGrid.solarKw != null ? `${liveGrid.solarKw.toFixed(0)} kW` : "—"}</span></div>
+            <div className="g-smart-chip"><span className="g-smart-chip-l">Storage SoC</span><span className="g-cost-value g-mono">{liveGrid.batterySoc != null ? `${liveGrid.batterySoc}%` : "—"}</span></div>
+            <div className="g-smart-chip"><span className="g-smart-chip-l">Demand response</span>{liveGrid.dr.length ? <Badge status="warning">{liveGrid.dr.length} active</Badge> : <Badge status="healthy">Idle</Badge>}</div>
+          </div>
+          <div className="g-insight" style={{ marginTop: 12 }}>
+            <Radio size={14} style={{ color: C.cyan, flexShrink: 0, marginTop: 2 }} />
+            <span>Grid values stream every 50 ms over MODBUS, demand-response events come from the OpenADR2.0b VEN, and {liveGrid.volttronSites} VOLTTRON site(s) feed forecasting — the peak-demand and headroom figures above reflect live conditions the moment this page loads.</span>
+          </div>
+        </Card>
+      )}
 
       <div className="g-grid g-grid-3" style={{ marginTop: 18 }}>
         <Card title="Grid load vs. capacity" icon={Gauge} style={{ gridColumn: "span 2" }}>
@@ -4559,6 +4746,21 @@ function OwnerGridPage({ preferences }) {
 
 function OwnerBatteryPage() {
   const { fleetHealthTrend, healthDistribution, batteryWatchlist } = useOwnerData();
+  const { live, liveConnected } = useLiveData();
+
+  // Live pack telemetry from the OCPP stream: surface current SoC + module temps
+  // straight off the charge points so the fleet view reflects the live network.
+  const livePacks = useMemo(() => {
+    const stations = live?.stations || [];
+    return stations.map((st) => {
+      const conns = st.connectors || [];
+      const soc = conns.reduce((m, c) => Math.max(m, c.soC || 0), 0) || null;
+      const temp = conns.reduce((m, c) => Math.max(m, c.tempC || 0), 0) || null;
+      return { id: st.identity, site: st.site || st.identity, status: st.status, soc, temp };
+    }).filter((p) => p.soc != null || p.temp != null);
+  }, [live]);
+  const liveTemp = livePacks.length ? Math.round(livePacks.reduce((n, p) => n + (p.temp || 0), 0) / livePacks.length) : null;
+
   return (
     <div className="g-page">
       <div className="g-page-head">
@@ -4569,8 +4771,32 @@ function OwnerBatteryPage() {
         <Kpi label="Fleet avg health" value="94.3%" sub="-0.6 pts vs. last month" icon={Battery} trend="down" />
         <Kpi label="Healthy (90%+)" value="18" sub="of 48 assets" icon={CheckCircle2} accent={C.green} />
         <Kpi label="Watchlist" value="6" sub="Below 85% health" icon={AlertTriangle} accent={C.amber} />
-        <Kpi label="Avg cycle count" value="612" sub="Across tracked packs" icon={BatteryCharging} />
+        <Kpi label={liveConnected ? "Live pack temp avg" : "Avg cycle count"} value={liveConnected && liveTemp != null ? `${liveTemp}°C` : "612"} sub={liveConnected ? "From live OCPP telemetry" : "Across tracked packs"} icon={BatteryCharging} accent={liveConnected ? C.cyan : C.textDim} />
       </div>
+
+      {liveConnected && livePacks.length > 0 && (
+        <Card title="Live pack telemetry (OCPP)" icon={Radio} style={{ marginTop: 16 }}>
+          <div className="g-live-sources" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))" }}>
+            {livePacks.map((p) => (
+              <div className="g-live-source" key={p.id}>
+                <span className="g-dot" style={{ background: p.status === "online" ? C.green : C.red, boxShadow: `0 0 8px ${p.status === "online" ? C.green : C.red}99` }} />
+                <div className="g-live-source-main">
+                  <div className="g-live-source-name">{p.site}</div>
+                  <div className="g-live-source-protocol g-mono">{p.id}</div>
+                </div>
+                <div className="g-live-source-detail">
+                  {p.soc != null && <span className="g-live-source-count" title="SoC">🔋 {Math.round(p.soc)}%</span>}
+                  {p.temp != null && <span className="g-live-source-count" title="Module temp">🌡 {p.temp.toFixed(0)}°C</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="g-insight" style={{ marginTop: 12 }}>
+            <Activity size={14} style={{ color: C.cyan, flexShrink: 0, marginTop: 2 }} />
+            <span>Module temperature and state-of-charge are sampled live from each charge point via OCPP MeterValues — thermal drift above 45°C is flagged before it accelerates pack aging.</span>
+          </div>
+        </Card>
+      )}
       <div className="g-grid g-grid-3" style={{ marginTop: 18 }}>
         <Card title="Fleet health trend (6 mo)" icon={TrendingUp} style={{ gridColumn: "span 2" }}>
           <ResponsiveContainer width="100%" height={180}>
@@ -4615,10 +4841,42 @@ function OwnerBatteryPage() {
 
 function OwnerAlertsPage() {
   const { anomalies, alertTrend, maintenanceQueue } = useOwnerData();
+  const { live, liveConnected } = useLiveData();
   const high = anomalies.filter((a) => a.severity === "high").length;
   const medium = anomalies.filter((a) => a.severity === "medium").length;
   const low = anomalies.filter((a) => a.severity === "low").length;
   const overdue = maintenanceQueue.filter((m) => m.due === "Overdue").length;
+
+  // Realtime anomalies straight from the protocol feeds.
+  const liveEvents = useMemo(() => {
+    const out = [];
+    const stations = live?.stations || [];
+    stations.forEach((st) => {
+      (st.connectors || []).forEach((c) => {
+        if (c.status === "Faulted" || c.status === "Unavailable") {
+          out.push({ kind: "ocpp", sev: "high", text: `${st.site || st.identity} · conn ${c.connectorId} ${c.status}`, src: "OCPP" });
+        }
+        if (c.tempC != null && c.tempC > 48) {
+          out.push({ kind: "ocpp", sev: "medium", text: `${st.site || st.identity} · conn ${c.connectorId} thermal ${c.tempC.toFixed(0)}°C`, src: "OCPP" });
+        }
+      });
+    });
+    const modbus = live?.modbus || {};
+    const regs = (modbus.registers || []).reduce((m, r) => { m[r.key] = r.value; return m; }, {});
+    if (typeof regs.grid_load_kw === "number" && regs.grid_load_kw > 0.6 * 600) {
+      out.push({ kind: "grid", sev: "warning", text: `Grid load at ${regs.grid_load_kw.toFixed(0)} kW (>60% capacity)`, src: "MODBUS" });
+    }
+    if (typeof regs.site_temp_c === "number" && regs.site_temp_c > 42) {
+      out.push({ kind: "site", sev: "medium", text: `Site temperature ${regs.site_temp_c.toFixed(0)}°C`, src: "MODBUS" });
+    }
+    ((live?.anpr?.events) || []).slice(0, 3).forEach((ev) => {
+      out.push({ kind: "anpr", sev: "info", text: `${ev.cameraId || "camera"} · ${ev.plate || ev.event || "detection"}`, src: "ANPR" });
+    });
+    (live?.volttron || []).slice(0, 2).forEach((s) => {
+      out.push({ kind: "volttron", sev: "info", text: `${s.site} gateway reporting`, src: "VOLTTRON" });
+    });
+    return out;
+  }, [live]);
 
   return (
     <div className="g-page">
@@ -4627,11 +4885,34 @@ function OwnerAlertsPage() {
         <p>Anomalies detected across telemetry, and what's queued for service.</p>
       </div>
       <div className="g-grid g-grid-4">
-        <Kpi label="High severity" value={high} icon={AlertTriangle} accent={C.red} />
-        <Kpi label="Medium severity" value={medium} icon={AlertTriangle} accent={C.amber} />
-        <Kpi label="Low severity" value={low} icon={AlertTriangle} accent={C.textDim} />
+        <Kpi label="High severity" value={high} sub="Historical flags" icon={AlertTriangle} accent={C.red} />
+        <Kpi label="Medium severity" value={medium} sub="Historical flags" icon={AlertTriangle} accent={C.amber} />
+        <Kpi label="Low severity" value={low} sub="Historical flags" icon={AlertTriangle} accent={C.textDim} />
         <Kpi label="Overdue maintenance" value={overdue} icon={Wrench} accent={C.red} />
       </div>
+
+      {liveConnected && liveEvents.length > 0 && (
+        <Card title="Live protocol alerts" icon={Radio} style={{ marginTop: 16 }}>
+          <div className="g-list">
+            {liveEvents.map((ev, i) => (
+              <div className="g-list-row" key={i}>
+                <div className="g-list-main">
+                  <span className="g-live-mini" style={{ flexShrink: 0 }}>{ev.src}</span>
+                  <span>
+                    <span style={{
+                      color: ev.sev === "high" ? C.red : ev.sev === "warning" ? C.amber : ev.sev === "medium" ? C.text : C.textDimmer,
+                    }}>{ev.text}</span>
+                    <span className="g-live-source-detail" style={{ display: "inline", marginLeft: 8 }}>
+                      <Badge status={ev.sev === "high" ? "critical" : ev.sev === "warning" ? "warning" : ev.sev === "medium" ? "warning" : "healthy"}>{ev.sev}</Badge>
+                    </span>
+                  </span>
+                </div>
+                <span className="g-list-sub">{ev.src} · live</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div className="g-grid g-grid-3" style={{ marginTop: 18 }}>
         <Card title="Alerts this week" icon={TrendingUp} style={{ gridColumn: "span 2" }}>
@@ -4686,8 +4967,27 @@ function OwnerAlertsPage() {
 
 function OwnerTheftPage({ preferences }) {
   const { theftFlags, theftTrend, theftByType } = useOwnerData();
+  const { live, liveConnected } = useLiveData();
   const totalLost = 860; // kWh, estimated
   const revenueImpact = 154; // $, estimated
+
+  // Live theft signal: compare the site master-meter draw (MODBUS) against the sum
+  // of connected OCPP sessions. Any unexplained positive spread is a leak candidate.
+  const liveLeak = useMemo(() => {
+    const modbus = live?.modbus || {};
+    const regs = (modbus.registers || []).reduce((m, r) => { m[r.key] = r.value; return m; }, {});
+    const gridKw = typeof regs.grid_load_kw === "number" ? regs.grid_load_kw : null;
+    const stationLoad = (live?.stations || []).reduce((sum, st) => sum + (st.connectors || []).reduce((s, c) => s + (c.powerKw || 0), 0), 0);
+    const siteOtherLoad = 12; // static non-EV load at site
+    let spread = null;
+    if (gridKw != null) spread = Math.max(0, gridKw - stationLoad - siteOtherLoad);
+    const sessions = live?.activeSessions || [];
+    const plateOps = (live?.anpr?.events || []).map((e) => e.plate).filter(Boolean);
+    const sessionPlates = sessions.map((s) => (s.plate || "").trim()).filter(Boolean);
+    const mismatch = sessionPlates.filter((p) => plateOps.length && !plateOps.includes(p)).length;
+    const highTemp = (live?.stations || []).some((st) => (st.connectors || []).some((c) => c.tempC != null && c.tempC > 50));
+    return { gridKw, stationLoad, siteOtherLoad, spread, mismatch, highTemp, liveConnected, sessions };
+  }, [live, liveConnected]);
 
   return (
     <div className="g-page">
@@ -4700,8 +5000,26 @@ function OwnerTheftPage({ preferences }) {
         <Kpi label="Suspected incidents" value={theftFlags.length} sub="Last 30 days" icon={ShieldOff} accent={C.red} />
         <Kpi label="Est. energy lost" value={`${totalLost} kWh`} sub="Unbilled or diverted" icon={Zap} accent={C.amber} />
         <Kpi label="Est. revenue impact" value={formatCurrency(revenueImpact, preferences.currency, preferences.region)} sub="At blended tariff" icon={DollarSign} accent={C.red} />
-        <Kpi label="Chargers flagged" value={`${theftFlags.length} / 48`} sub="Currently under watch" icon={Eye} />
+        <Kpi label={liveLeak.liveConnected ? "Live unexplained load" : "Chargers flagged"} value={liveLeak.liveConnected ? (liveLeak.spread != null ? `${liveLeak.spread.toFixed(0)} kW` : "—") : `${theftFlags.length} / 48`} sub={liveLeak.liveConnected ? "Grid − metered sessions" : "Currently under watch"} icon={Eye} accent={liveLeak.liveConnected && (liveLeak.spread || 0) > 2 ? C.red : C.textDim} />
       </div>
+
+      {liveLeak.liveConnected && (
+        <Card title="Live port-vs-grid divergence (MODBUS ↔ OCPP)" icon={ShieldOff} style={{ marginTop: 16 }}>
+          <div className="g-smart-charge-grid" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+            <div className="g-smart-chip"><span className="g-smart-chip-l">Site master meter</span><span className="g-cost-value g-mono">{liveLeak.gridKw != null ? `${liveLeak.gridKw.toFixed(0)} kW` : "—"}</span></div>
+            <div className="g-smart-chip"><span className="g-smart-chip-l">Sessions metered</span><span className="g-cost-value g-mono">{liveLeak.stationLoad.toFixed(0)} kW</span></div>
+            <div className="g-smart-chip"><span className="g-smart-chip-l">Unaccounted draw</span><span className="g-cost-value g-mono" style={{ color: (liveLeak.spread || 0) > 2 ? C.red : C.green }}>{liveLeak.spread != null ? `${liveLeak.spread.toFixed(1)} kW` : "—"}</span></div>
+            <div className="g-smart-chip"><span className="g-smart-chip-l">Active OCPP sessions</span><span className="g-cost-value g-mono">{liveLeak.sessions.length}</span></div>
+          </div>
+          <div className="g-insight" style={{ marginTop: 12 }}>
+            <ShieldOff size={14} style={{ color: C.green, flexShrink: 0, marginTop: 2 }} />
+            <span>
+              Theft is inferred when the site master meter (MODBUS) shows more draw than the summed OCPP MeterValues can explain
+              {liveLeak.mismatch > 0 ? ` — ${liveLeak.mismatch} active session${liveLeak.mismatch > 1 ? "s" : ""} have no matching ANPR plate.` : " — every active session matches an ANPR plate."}
+            </span>
+          </div>
+        </Card>
+      )}
 
       <div className="g-grid g-grid-3" style={{ marginTop: 18 }}>
         <Card title="Incidents per week" icon={TrendingUp} style={{ gridColumn: "span 2" }}>
@@ -4768,6 +5086,23 @@ function OwnerPredictiveInsightsPage({ onNavigate }) {
   const [horizon, setHorizon] = useState("24h");
   const { live, liveConnected } = useLiveData();
 
+  // Live telemetry + live station risk feed drives the forecast baseline.
+  const liveStats = useMemo(() => {
+    const modbus = live?.modbus || {};
+    const regs = (modbus.registers || []).reduce((m, r) => { m[r.key] = r.value; return m; }, {});
+    const loadKw = typeof regs.grid_load_kw === "number" ? regs.grid_load_kw : null;
+    const solarKw = typeof regs.solar_kw === "number" ? regs.solar_kw : null;
+    const batterySoc = typeof regs.battery_soc === "number" ? regs.battery_soc : null;
+    const siteTemp = typeof regs.site_temp_c === "number" ? regs.site_temp_c : null;
+    const stations = live?.stations || [];
+    const online = stations.filter((s) => s.status === "online");
+    const charging = online.filter((s) => (s.connectors || []).some((c) => c.powerKw > 0.1));
+    const thermalRisk = stations.filter((s) => (s.connectors || []).some((c) => c.tempC > 46));
+    const drActive = (live?.drEvents || []).some((e) => !e.cancelled && new Date(e.endAt) > Date.now());
+    const baseline = loadKw != null ? loadKw : 640;
+    return { loadKw, solarKw, batterySoc, siteTemp, stations, online, charging, thermalRisk, drActive, baseline, liveConnected };
+  }, [live, liveConnected]);
+
   const forecastData = useMemo(() => {
     const now = Date.now();
     const hourly = horizon === "6h" ? 6 : horizon === "24h" ? 24 : 0;
@@ -4780,8 +5115,8 @@ function OwnerPredictiveInsightsPage({ onNavigate }) {
       const hour = t.getHours();
       const isPeak = hour >= 17 && hour <= 21;
       const base = hourly
-        ? 640 + Math.sin((hour / 24) * Math.PI * 2.6) * 150 + (isPeak ? 140 : 0)
-        : 640 + Math.sin((i + horizon.length) * 1.3) * 95 + i * 5;
+        ? liveStats.baseline + Math.sin((hour / 24) * Math.PI * 2.6) * 150 + (isPeak ? 140 : 0)
+        : liveStats.baseline + Math.sin((i + horizon.length) * 1.3) * 95 + i * 5;
       const variance = hourly ? Math.sin(i * 2.1) * 40 : Math.sin(i * 1.7) * 45;
       pts.push({
         label: hourly
@@ -4792,7 +5127,7 @@ function OwnerPredictiveInsightsPage({ onNavigate }) {
       });
     }
     return pts;
-  }, [horizon]);
+  }, [horizon, liveStats.baseline]);
 
   const scenarios = [
     { key: "steady", label: "Steady state", peak: 558, delta: 0 },
@@ -4801,13 +5136,33 @@ function OwnerPredictiveInsightsPage({ onNavigate }) {
   ];
   const scenarioColors = [C.amber, C.cyan, C.green];
 
-  const siteRisk = [
-    { site: "Anna Nagar Hub", score: 86, risk: "Peak congestion", trend: "up" },
-    { site: "Katpadi Junction", score: 64, risk: "Thermal drift", trend: "flat" },
-    { site: "Gandhi Nagar", score: 57, risk: "Utilisation dip", trend: "up" },
-    { site: "Vellore Depot", score: 41, risk: "Normal", trend: "flat" },
-    { site: "CMC Parking", score: 36, risk: "Normal", trend: "down" },
-  ];
+  const siteRisk = useMemo(() => {
+    if (!liveConnected || liveStats.stations.length === 0) {
+      return [
+        { site: "Anna Nagar Hub", score: 86, risk: "Peak congestion", trend: "up" },
+        { site: "Katpadi Junction", score: 64, risk: "Thermal drift", trend: "flat" },
+        { site: "Gandhi Nagar", score: 57, risk: "Utilisation dip", trend: "up" },
+        { site: "Vellore Depot", score: 41, risk: "Normal", trend: "flat" },
+        { site: "CMC Parking", score: 36, risk: "Normal", trend: "down" },
+      ];
+    }
+    return liveStats.stations.map((st) => {
+      const site = st.site || st.identity;
+      const conns = st.connectors || [];
+      const load = conns.reduce((s, c) => s + (c.powerKw || 0), 0);
+      const maxTemp = conns.reduce((m, c) => Math.max(m, c.tempC || 0), 0);
+      const faulted = conns.some((c) => c.status === "Faulted" || c.status === "Unavailable");
+      let score = 25;
+      if (load > 20) score += 30;
+      if (maxTemp > 46) score += 24;
+      if (maxTemp > 50) score += 10;
+      if (faulted) score += 22;
+      if (st.status !== "online") score = 78;
+      score = Math.min(96, score);
+      const risk = score > 70 ? "Peak congestion" : score > 50 ? maxTemp > 46 ? "Thermal drift" : "Utilisation dip" : "Normal";
+      return { site, score, risk, trend: score > 60 ? "up" : "flat" };
+    });
+  }, [liveConnected, liveStats]);
 
   const timelineEvents = [
     { time: "Today 18:00", title: "Evening peak window opens", detail: "Network load forecast at 91% of contracted capacity", kind: "peak" },
@@ -4889,10 +5244,20 @@ function OwnerPredictiveInsightsPage({ onNavigate }) {
       )}
       <div className="g-grid g-grid-4">
         <Kpi label="Forecast accuracy" value="92%" sub="Based on 90 days of network data" icon={Target} accent={C.green} />
-        <Kpi label="Sites monitored" value="6" sub="Live charger and grid signals" icon={Activity} />
-        <Kpi label="Model confidence" value="High" sub="Current network predictions" icon={CheckCircle2} accent={C.green} />
+        <Kpi label="Sites monitored" value={liveConnected ? liveStats.stations.length : "6"} sub={liveConnected ? `${liveStats.charging.length} charging live · OCPP` : "Live charger and grid signals"} icon={Activity} />
+        <Kpi label="Model confidence" value="High" sub={liveConnected ? `Baseline ${liveStats.baseline.toFixed(0)} kW live` : "Current network predictions"} icon={CheckCircle2} accent={C.green} />
         <Kpi label="Last updated" value={liveConnected ? "Live stream" : "18 min ago"} sub={liveConnected ? "From OCPP · MODBUS · OpenADR feeds" : "Refreshes every 30 minutes"} icon={Clock} accent={liveConnected ? C.green : C.textDim} />
       </div>
+
+      {liveConnected && (
+        <div className="g-grid g-grid-5" style={{ marginTop: 16 }}>
+          <div className="g-sig"><span className="g-sig-v">{liveStats.loadKw != null ? `${liveStats.loadKw.toFixed(0)} kW` : "—"}</span><span className="g-sig-l">Grid load · MODBUS</span></div>
+          <div className="g-sig"><span className="g-sig-v" style={{ color: C.green }}>{liveStats.solarKw != null ? `${liveStats.solarKw.toFixed(0)} kW` : "—"}</span><span className="g-sig-l">Solar PV · MODBUS</span></div>
+          <div className="g-sig"><span className="g-sig-v">{liveStats.batterySoc != null ? `${liveStats.batterySoc}%` : "—"}</span><span className="g-sig-l">Storage SoC · MODBUS</span></div>
+          <div className="g-sig"><span className="g-sig-v">{liveStats.siteTemp != null ? `${liveStats.siteTemp.toFixed(0)}°C` : "—"}</span><span className="g-sig-l">Site temp · MODBUS</span></div>
+          <div className="g-sig"><span className="g-sig-v">{liveStats.drActive ? "Active" : "Idle"}</span><span className="g-sig-l">OpenADR DR signal</span></div>
+        </div>
+      )}
       <div className="g-grid g-grid-2" style={{ marginTop: 18 }}>
         <Card title="Network predictions" icon={TrendingUp}>
           <div className="g-predictions-list">
@@ -6395,6 +6760,14 @@ export default function GridPulseApp() {
         .g-schedule-value{font-size:13px; font-weight:600; color:${C.text}; font-family:var(--mono);}
         .g-schedule-timeline{display:flex; gap:6px; align-items:stretch;}
         .g-schedule-seg{display:flex; flex-direction:column; justify-content:center; gap:2px; padding:8px 10px; border:1px solid; border-radius:10px; min-width:70px;}
+        .g-cost-break{display:flex; flex-direction:column; gap:8px; padding:12px; background:rgba(255,255,255,0.02); border:1px solid ${C.border}; border-radius:12px;}
+        .g-cost-row{display:flex; justify-content:space-between; align-items:center;}
+        .g-cost-label{font-size:12px; color:${C.textDim};}
+        .g-cost-value{font-size:13px; color:${C.text}; font-family:var(--mono);}
+        .g-smart-charge-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px;}
+        @media(max-width:640px){ .g-smart-charge-grid{grid-template-columns:1fr;} }
+        .g-smart-chip{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border:1px solid ${C.border}; border-radius:10px; background:rgba(255,255,255,0.02);}
+        .g-smart-chip-l{font-size:12px; color:${C.text};}
 
         /* ---- predictions ---- */
         .g-predictions-list{display:flex; flex-direction:column; gap:8px;}
@@ -6796,7 +7169,10 @@ export default function GridPulseApp() {
         @media(max-width:920px){ .g-grid-2,.g-grid-3,.g-grid-4,.g-grid-5{grid-template-columns:1fr;} .g-grid [style*="span 2"]{grid-column:span 1 !important;} }
         .g-sig{display:flex; flex-direction:column; gap:2px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid ${C.border}; border-radius:12px;}
         .g-sig-v{font-size:20px; font-weight:700; color:${C.text}; font-family:var(--mono);}
+        .g-sig-sub{font-size:11px; color:${C.textDim}; font-weight:500; font-family:var(--sans);}
         .g-sig-l{font-size:11px; color:${C.textDim};}
+        .g-live-session-chips{display:flex; gap:6px; flex-wrap:wrap;}
+        .g-chip-live{color:${C.cyan}; border-color:${C.cyan}55; background:${C.cyan}14; font-family:var(--mono); font-size:11.5px;}
         .g-locsearch-row{display:flex; align-items:center; gap:10px;}
         .g-locsearch-input{display:flex; align-items:center; gap:8px; flex:1; padding:0 12px; border:1px solid ${C.border}; border-radius:10px; background:rgba(255,255,255,0.02);}
         .g-locsearch-input input{flex:1; background:transparent; border:none; outline:none; color:${C.text}; padding:11px 0; font-size:13.5px;}
