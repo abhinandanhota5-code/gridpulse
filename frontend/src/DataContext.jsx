@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useRef } from "react";
 import { Zap, Gauge, Leaf } from "lucide-react";
 import { COLOR_KEY } from "./theme.js";
-import { api } from "./api.js";
+import { api, STREAM_URL } from "./api.js";
 
 const AppDataContext = createContext(null);
 
@@ -23,6 +23,9 @@ export function AppDataProvider({ children }) {
   const [owner, setOwner] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // `live` carries the merged protocol snapshot (sources, stations, anpr, ...).
+  const [live, setLive] = useState(null);
+  const [liveConnected, setLiveConnected] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,12 +43,65 @@ export function AppDataProvider({ children }) {
         if (!cancelled) setLoading(false);
       });
 
+    // Subscribe to the live protocol stream. If EventSource is unavailable
+    // (or times out), fall back to a 10s poll of the same snapshot.
+    let es = null;
+    let pollTimer = null;
+    let esOk = false;
+
+    const applySnapshot = (snap) => {
+      if (cancelled || !snap || typeof snap !== "object") return;
+      setLiveConnected(true);
+      setLive(snap);
+    };
+
+    const onFinalFailure = () => {
+      if (cancelled || esOk) return;
+      pollTimer = setInterval(() => {
+        api.getLive().then(applySnapshot).catch(() => {});
+      }, 10000);
+      pollTimer.unref?.();
+    };
+
+    const openStream = () => {
+      try {
+        es = new EventSource(STREAM_URL);
+        es.onopen = () => {
+          esOk = true;
+          setLiveConnected(true);
+        };
+        es.onmessage = (ev) => {
+          try {
+            applySnapshot(JSON.parse(ev.data));
+          } catch {
+            /* ignore malformed frames */
+          }
+        };
+        es.onerror = () => {
+          setLiveConnected(false);
+          es.close();
+          es = null;
+          onFinalFailure();
+        };
+      } catch {
+        onFinalFailure();
+      }
+    };
+    openStream();
+    const failGuard = setTimeout(onFinalFailure, 12000);
+
     return () => {
       cancelled = true;
+      clearTimeout(failGuard);
+      if (pollTimer) clearInterval(pollTimer);
+      if (es) es.close();
     };
   }, []);
 
-  const value = useMemo(() => ({ driver, owner, loading, error }), [driver, owner, loading, error]);
+  const value = useMemo(
+    () => ({ driver, owner, live, liveConnected, loading, error }),
+    [driver, owner, live, liveConnected, loading, error]
+  );
 
   return <AppDataContext.Provider value={value}>{children}</AppDataContext.Provider>;
 }
@@ -65,4 +121,9 @@ export function useDriverData() {
 export function useOwnerData() {
   const { owner, loading, error } = useAppData();
   return { ...(owner || {}), loading, error };
+}
+
+export function useLiveData() {
+  const { live, liveConnected } = useAppData();
+  return { live, liveConnected };
 }

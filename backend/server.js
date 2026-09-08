@@ -1,6 +1,13 @@
 const express = require("express");
 const cors = require("cors");
-const { driverData, ownerData } = require("./data");
+const http = require("http");
+
+const { live } = require("./live");
+const { attach: attachOcpp } = require("./ocpp");
+const { registerAnpr } = require("./anpr");
+const { registerModbus } = require("./modbus");
+const { registerOpenAdr } = require("./openadr");
+const { buildDriverData, buildOwnerData } = require("./merge");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -18,24 +25,50 @@ app.use(
     origin: allowedOrigins.includes("*") ? true : allowedOrigins,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
+/* Capture the raw XML/JSON body for the OpenADR endpoints. */
+app.use("/openadr", (req, res, next) => {
+  const chunks = [];
+  req.on("data", (c) => chunks.push(c));
+  req.on("end", () => {
+    req.rawBody = Buffer.concat(chunks).toString("utf8") || req.rawBody;
+    next();
+  });
+});
+
+const INGEST_TOKEN = process.env.INGEST_TOKEN || null;
+
+function requireIngestToken(req, res, next) {
+  if (!INGEST_TOKEN) return next();
+  if (req.headers["x-ingest-token"] === INGEST_TOKEN) return next();
+  return res.status(401).json({ error: "unauthorized" });
+}
+
+/* ---- core API ---- */
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "gridpulse-backend", time: new Date().toISOString() });
 });
 
-// EV driver dashboard: history, FASTag transactions, nearby chargers, charge planner data.
-app.get("/api/driver", (_req, res) => {
-  res.json(driverData);
+app.get("/api/live", (_req, res) => {
+  res.json(live.snapshot());
 });
 
-// Fleet owner dashboard: chargers, sessions, grid load, theft detection, etc.
+app.get("/api/stream", (req, res) => {
+  live.addStream(res);
+});
+
+// EV driver dashboard: history, FASTag transactions, live OCPP sessions, charge planner data.
+app.get("/api/driver", (_req, res) => {
+  res.json(buildDriverData());
+});
+
+// Fleet owner dashboard: chargers, sessions, grid load, theft detection, demand response.
 app.get("/api/owner", (_req, res) => {
-  res.json(ownerData);
+  res.json(buildOwnerData());
 });
 
 // Mock login — swap for real auth (JWT/session/OAuth) when ready.
-// Accepts { email, role: "ev" | "owner" } and echoes back a session object.
 app.post("/api/auth/login", (req, res) => {
   const { email, role } = req.body || {};
   const safeRole = role === "owner" ? "owner" : "ev";
@@ -43,10 +76,40 @@ app.post("/api/auth/login", (req, res) => {
   res.json({ name, role: safeRole });
 });
 
+/* ---- edge-agent ingest bridges (Josev V2G + VOLTTRON) ---- */
+app.post("/api/ingest/josev", requireIngestToken, (req, res) => {
+  const b = req.body || {};
+  if (!b.event) return res.status(400).json({ error: "event required" });
+  live.addV2G({
+    station: b.station || "Josev-V2G-01",
+    event: b.event,
+    connectorId: b.connectorId || 1,
+    energyKwh: Number(b.energyKwh) || 0,
+    powerKw: Number(b.powerKw) || 0,
+    details: b.details || null,
+  });
+  res.json({ ok: true });
+});
+
+app.post("/api/ingest/volttron", requireIngestToken, (req, res) => {
+  const b = req.body || {};
+  if (!b.metrics) return res.status(400).json({ error: "metrics required" });
+  live.addVolttronMetric(b.site || "site-1", b.metrics);
+  res.json({ ok: true });
+});
+
+/* ---- protocol services ---- */
+registerAnpr(app);
+registerOpenAdr(app);
+registerModbus(app);
+
 app.use((req, res) => {
   res.status(404).json({ error: "Not found", path: req.path });
 });
 
-app.listen(PORT, () => {
-  console.log(`GRIDPULSE backend listening on port ${PORT}`);
+const httpServer = http.createServer(app);
+attachOcpp(httpServer).then(() => {
+  httpServer.listen(PORT, () => {
+    console.log(`GRIDPULSE backend listening on port ${PORT}`);
+  });
 });
