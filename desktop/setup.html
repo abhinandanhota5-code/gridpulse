@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GRIDPULSE — Setup guide</title>
+<style>
+  :root { --bg:#0b1017; --panel:#111a24; --line:#1e2a38; --txt:#d6e2ee; --mut:#7c8fa3; --acc:#37d0a8; --amber:#f2b950; --red:#ff7a7a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,"Segoe UI",system-ui,sans-serif; padding:40px 24px; }
+  .wrap { max-width:880px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 4px; letter-spacing:.5px; }
+  .sub { color:var(--mut); margin:0 0 26px; font-size:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px 22px; margin:0 0 16px; }
+  .row { display:flex; align-items:flex-start; gap:12px; padding:11px 0; border-bottom:1px solid #15202c; }
+  .row:last-child { border-bottom:0; }
+  .dot { width:11px; height:11px; border-radius:50%; margin-top:5px; flex:0 0 auto; background:#2a3a4c; }
+  .dot.ok { background:var(--acc); box-shadow:0 0 10px rgba(55,208,168,.5); }
+  .dot.warn { background:var(--amber); box-shadow:0 0 10px rgba(242,185,80,.4); }
+  .dot.bad { background:var(--red); box-shadow:0 0 10px rgba(255,122,122,.4); }
+  .k { font-weight:600; font-size:14.5px; }
+  .v { color:var(--mut); font-size:13px; margin-top:2px; line-height:1.5; }
+  .tag { margin-left:8px; font-size:11px; font-weight:600; padding:1px 8px; border-radius:999px; border:1px solid var(--line); color:var(--mut); text-transform:uppercase; letter-spacing:.4px; }
+  .tag.ok { color:var(--acc); border-color:#1c3a30; }
+  .tag.warn { color:var(--amber); border-color:#40351f; }
+  .feeds { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .chip { font-size:12px; border:1px solid var(--line); padding:4px 10px; border-radius:999px; color:var(--mut); }
+  .chip.ok { color:var(--acc); border-color:#1c3a30; }
+  .chip.warn { color:var(--amber); border-color:#40351f; }
+  .btn { border:0; border-radius:10px; padding:12px 22px; font-size:15px; font-weight:600; cursor:pointer; }
+  .btn.pri { background:var(--acc); color:#06120e; }
+  .btn.sec { background:transparent; border:1px solid #2a3a4c; color:var(--txt); }
+  .actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:6px; }
+  .link { color:var(--acc); text-decoration:none; font-size:13px; cursor:pointer; margin-right:14px; }
+  .foot { color:var(--mut); font-size:12px; margin-top:18px; line-height:1.7; }
+  .pulse { animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
+  #nextV { white-space:pre-line; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>GRIDPULSE Desktop</h1>
+  <p class="sub">Setup guide — what's needed to run your charging dashboard, and what you'd download if anything were missing.</p>
+
+  <div class="card">
+    <div class="row">
+      <div class="dot" id="rtDot"></div>
+      <div style="flex:1">
+        <div class="k">App runtime <span class="tag" id="rtTag">checking</span></div>
+        <div class="v" id="rtV">GRIDPULSE ships its own bundled Node.js runtime inside the app, so nothing needs installing.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="dot" id="gwDot"></div>
+      <div style="flex:1">
+        <div class="k">Local gateway <span class="tag" id="gwTag">checking</span></div>
+        <div class="v" id="gwV">The bundled gateway (dashboards + charge-point registry) runs on this computer on a local port.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="dot" id="clipDot"></div>
+      <div style="flex:1">
+        <div class="k">Live integrations <span class="tag" id="clipTag">checking</span></div>
+        <div class="v" id="clipV">Real-time feeds: OCPP charge points, MODBUS site meters, OpenADR demand response, V2G sessions, VOLTTRON sites and ANPR camera events.</div>
+        <div class="feeds" id="feeds"></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="dot" id="netDot"></div>
+      <div style="flex:1">
+        <div class="k">Internet (live weather &amp; exchange rate) <span class="tag" id="netTag">checking</span></div>
+        <div class="v" id="netV">Realtime temperature, forecast and the USD&rarr;INR rate are fetched live. Offline, GRIDPULSE keeps working with stored norms.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="nextCard" style="display:none">
+    <div class="k" style="font-size:15px" id="nextTitle">Everything looks ready</div>
+    <div class="v" id="nextV" style="margin-top:6px"></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn pri" id="openBtn">Open GRIDPULSE &rarr;</button>
+    <button class="btn sec" id="recheckBtn">Re-run checks</button>
+    <a class="link" id="browserLink">Open in web browser</a>
+    <a class="link" id="folderLink">Show app files</a>
+  </div>
+
+  <div class="foot">
+    Demo accounts: driver <b>TN84DR5021</b> / <b>demo123</b> &middot; owner <b>GRIDPULSE</b> / <b>owner123</b>.<br>
+    The app bundles everything &mdash; a normal installation needs nothing else. If a component genuinely can't start, it's listed above with a note.
+    Developers / self-hosting: <a class="link" id="repoLink">open the open-source repo</a>; running from source needs Node.js &gt;= 18 (<a class="link" id="nodeLink">download</a>).
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const tagged = (dot, tag, klass, label) => { dot.className = "dot " + klass; tag.className = "tag " + klass; tag.textContent = label; };
+
+  async function check() {
+    $("openBtn").disabled = true;
+    for (const id of ["rtDot", "gwDot", "clipDot", "netDot"]) $(id).className = "dot pulse";
+    for (const t of ["rtTag", "gwTag", "clipTag", "netTag"]) $(t).textContent = "checking";
+
+    let r;
+    try { r = await window.gridpulse.health(); }
+    catch (e) {
+      tagged($("rtDot"), $("rtTag"), "bad", "error");
+      tagged($("gwDot"), $("gwTag"), "bad", "offline");
+      tagged($("clipDot"), $("clipTag"), "bad", "offline");
+      tagged($("netDot"), $("netTag"), "warn", "unknown");
+      $("nextTitle").textContent = "Something didn't start";
+      $("nextV").textContent = "The app process couldn't talk to its own gateway. Quit and relaunch GRIDPULSE; if it persists, re-download the app.";
+      $("nextCard").style.display = "";
+      return;
+    }
+
+    const now = r.port || 0;
+
+    const rt = r.runtime || {};
+    tagged($("rtDot"), $("rtTag"), "ok", "ready");
+    $("rtV").textContent = "Everything is bundled \u2014 the app uses its own runtime (Node " + (rt.node || "?") + " on Electron " + (rt.electron || "?") + "). Nothing to download for a normal install.";
+
+    tagged($("gwDot"), $("gwTag"), r.ok ? "ok" : "bad", r.ok ? "running" : "stopped");
+    $("gwV").textContent = "Gateway " + (r.ok ? "running" : "not responding") + (now ? " on http://127.0.0.1:" + now : "") + " (status: " + (r.healthy || (r.ok ? "ok" : "unreachable")) + ").";
+
+    const feeds = r.feeds || [];
+    const good = feeds.filter((f) => f.status && String(f.status).toLowerCase() !== "offline");
+    const clipClass = feeds.length && good.length ? "ok" : "warn";
+    tagged($("clipDot"), $("clipTag"), clipClass, feeds.length && good.length ? good.length + "/" + feeds.length + " live" : "starting");
+    const box = $("feeds");
+    box.innerHTML = "";
+    for (const f of feeds) {
+      const c = document.createElement("span");
+      c.className = "chip" + (String(f.status).toLowerCase() !== "offline" ? " ok" : " warn");
+      c.textContent = f.name + ": " + f.status;
+      box.appendChild(c);
+    }
+    $("clipV").textContent = feeds.length
+      ? "These bundled protocol components keep every dashboard alive: OCPP charge points, MODBUS meters, OpenADR demand-response, V2G, VOLTTRON and ANPR. No external hardware or servers are required."
+      : "Live feed list isn't available yet \u2014 the gateway may still be starting. Re-run checks in a few seconds.";
+
+    const online = !!r.online;
+    tagged($("netDot"), $("netTag"), online ? "ok" : "warn", online ? "live" : "offline mode");
+    $("netV").textContent = online
+      ? "Realtime Open-Meteo weather and the live USD\u2192INR rate are reachable."
+      : "You appear to be offline. GRIDPULSE keeps working using stored tariff and weather norms; connect to the internet to get live temperature, forecasts and the exchange rate.";
+
+    const problems = [];
+    if (!r.ok) problems.push("gateway not running \u2014 relaunch the app");
+    if (feeds.length && !good.length) problems.push("live integrations still starting \u2014 wait a few seconds and re-run checks");
+    if (!online) problems.push("you're offline \u2014 live weather & exchange rate are paused (app still fully usable)");
+    if (problems.length) {
+      $("nextTitle").textContent = "Small things to resolve";
+      $("nextV").textContent = problems.map((p) => "\u2022 " + p).join("\n");
+    } else {
+      $("nextTitle").textContent = "Everything looks ready";
+      $("nextV").textContent = "All checks passed. Open the dashboard, log in with either demo account, and explore the driver and owner views.";
+    }
+    $("nextCard").style.display = "";
+    $("openBtn").disabled = false;
+  }
+
+  $("openBtn").addEventListener("click", () => window.gridpulse.openDashboard());
+  $("recheckBtn").addEventListener("click", check);
+  $("browserLink").addEventListener("click", () => window.gridpulse.getPort().then((p) => window.gridpulse.openExternal("http://127.0.0.1:" + p)));
+  $("folderLink").addEventListener("click", () => window.gridpulse.openAppFolder());
+  $("repoLink").addEventListener("click", () => window.gridpulse.openExternal("https://github.com/abhinandanhota5-code/gridpulse"));
+  $("nodeLink").addEventListener("click", () => window.gridpulse.openExternal("https://nodejs.org/en/download"));
+  check();
+</script>
+</body>
+</html>

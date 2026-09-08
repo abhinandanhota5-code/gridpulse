@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
+const path = require("path");
+const fs = require("fs");
 
 const { live } = require("./live");
 const { attach: attachOcpp } = require("./ocpp");
@@ -9,6 +11,7 @@ const { registerModbus } = require("./modbus");
 const { registerOpenAdr } = require("./openadr");
 const { buildDriverData, buildOwnerData } = require("./merge");
 const fx = require("./fx");
+const { fetchWeather } = require("./weather");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -61,6 +64,16 @@ app.get("/api/fx", async (_req, res) => {
   res.json({ usdToInr: fxState.rate, source: fxState.source, fetchedAt: fxState.fetchedAt || null });
 });
 
+/* Real-time weather for a GPS coordinate (Open-Meteo proxy, cached, fallback). */
+app.get("/api/weather", async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    return res.status(400).json({ error: "lat and lon (numbers) are required" });
+  }
+  res.json(await fetchWeather(lat, lon));
+});
+
 app.get("/api/stream", (req, res) => {
   live.addStream(res);
 });
@@ -109,6 +122,21 @@ app.post("/api/ingest/volttron", requireIngestToken, (req, res) => {
 registerAnpr(app);
 registerOpenAdr(app);
 registerModbus(app);
+
+/* ---- single-service static host ----
+   In production the backend serves the built SPA (frontend/dist) from the same
+   origin, so the UI and API/WebSocket live behind one URL. If the build output
+   is missing (e.g. local dev), API-only mode keeps working. */
+const DIST_DIR = process.env.GRIDPULSE_DIST || path.join(__dirname, "..", "frontend", "dist");
+if (fs.existsSync(path.join(DIST_DIR, "index.html"))) {
+  app.use(express.static(DIST_DIR, { index: false, setHeaders: (res, filePath) => {
+    res.setHeader("Cache-Control", filePath.endsWith("index.html") ? "no-cache" : "public, max-age=3600");
+  }}));
+  app.get(/^\/(?!api\/|openadr\/).*/, (req, res, next) => {
+    if (req.method !== "GET" || !req.accepts("html")) return next();
+    res.sendFile(path.join(DIST_DIR, "index.html"));
+  });
+}
 
 app.use((req, res) => {
   res.status(404).json({ error: "Not found", path: req.path });

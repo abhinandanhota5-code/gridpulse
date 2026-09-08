@@ -1,0 +1,87 @@
+{
+  "name": "gridpulse-desktop",
+  "version": "1.0.0",
+  "description": "GRIDPULSE Desktop — EV charging dashboards for driver and fleet owner. Ships its own runtime; nothing to install.",
+  "main": "main.cjs",
+  "license": "Apache-2.0",
+  "author": "GRIDPULSE contributors",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac dmg zip",
+    "dist:win": "electron-builder --win nsis zip",
+    "check": "node --check main.cjs && node --check preload.cjs"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "modbus-serial": "^8.0.25",
+    "ocpp-ws-io": "^2.3.1"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.gridpulse.app",
+    "productName": "GRIDPULSE",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!**/node_modules/**"
+        ]
+      },
+      {
+        "from": "../frontend/dist",
+        "to": "web"
+      },
+      {
+        "from": "../scripts",
+        "to": "scripts"
+      }
+    ],
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "setup.html"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "assets/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "GRIDPULSE-${version}-mac.${ext}"
+    },
+    "win": {
+      "icon": "assets/icon.png",
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "artifactName": "GRIDPULSE-${version}-win.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "GRIDPULSE"
+    }
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "@serialport/bindings-cpp@13.0.0": true
+  }
+}

@@ -9,9 +9,17 @@
 /*  Env: SITES (comma list, default all), SLEEP_MS                    */
 /* ------------------------------------------------------------------ */
 const path = require("path");
-const { OCPPClient } = require(path.join(__dirname, "..", "backend", "node_modules", "ocpp-ws-io"));
+let OCPP;
+try {
+  // Repo layout: backend node_modules contains ocpp-ws-io.
+  OCPP = require(path.join(__dirname, "..", "backend", "node_modules", "ocpp-ws-io"));
+} catch (_) {
+  // Packaged desktop app: module lives in the app's node_modules (NODE_PATH).
+  OCPP = require("ocpp-ws-io");
+}
+const { OCPPClient } = OCPP;
 
-const BASE = process.argv[2] || "ws://localhost:4000";
+const BASE = process.argv[2] || process.env.GRIDPULSE_EGRESS || "ws://localhost:4000";
 const SLEEP_MS = Number(process.env.SLEEP_MS || 2500);
 
 const SITES = [

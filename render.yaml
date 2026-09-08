@@ -1,10 +1,16 @@
 services:
   - type: web
-    name: gridpulse-backend
+    name: gridpulse
     runtime: node
-    rootDir: backend
-    buildCommand: npm install
-    startCommand: npm start
+    plan: free
+    autoDeploy: true
+    buildCommand: npm install && npm run build
+    startCommand: node backend/server.js
+    healthCheckPath: /api/health
     envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: INGEST_TOKEN
+        sync: false
       - key: CORS_ORIGIN
         sync: false

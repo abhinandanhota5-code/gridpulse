@@ -12,14 +12,146 @@ import {
   CloudRain, CloudSun, Droplets, Thermometer, Eye, CreditCard, Wallet, Users, Target, Fuel,
   Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu,
   LocateFixed, RefreshCw, Navigation, FileText, Upload, ShieldCheck, BadgeCheck, CalendarDays, ArrowUpDown,
-  Sun, Moon
+  Sun, Moon, Cloud, CloudFog, CloudSnow, CloudLightning, Wind, Compass
 } from "lucide-react";
 
 import { C, STATUS_COLOR, CONFIDENCE_COLOR } from "./theme.js";
 import { useAppData, useDriverData, useOwnerData, useLiveData } from "./DataContext.jsx";
-import { API_BASE_URL, wsBaseUrl, PLATE_EVENT_SAMPLE } from "./api.js";
+import { api, API_BASE_URL, wsBaseUrl, PLATE_EVENT_SAMPLE } from "./api.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+
+// Human-readable API endpoint for the Settings/integrations panel. In the
+// single-service deploy the API base is empty, so show the page's own origin.
+const ENDPOINT_LABEL = API_BASE_URL || (typeof window !== "undefined" ? window.location.origin : "");
+
+/* ---- live weather (Open-Meteo, GPS-driven) ---- */
+const WMO = {
+  0: { label: "Clear sky", icon: Sun, color: "#FFB86B" },
+  1: { label: "Mainly clear", icon: Sun, color: "#FFD479" },
+  2: { label: "Partly cloudy", icon: CloudSun, color: "#FFD479" },
+  3: { label: "Overcast", icon: Cloud, color: "#9FB3C8" },
+  45: { label: "Fog", icon: CloudFog, color: "#B8C4CE" },
+  48: { label: "Rime fog", icon: CloudFog, color: "#B8C4CE" },
+  51: { label: "Light drizzle", icon: CloudRain, color: "#4FE3FF" },
+  53: { label: "Drizzle", icon: CloudRain, color: "#4FE3FF" },
+  55: { label: "Heavy drizzle", icon: CloudRain, color: "#4FE3FF" },
+  56: { label: "Freezing drizzle", icon: CloudSnow, color: "#9FB3C8" },
+  57: { label: "Freezing drizzle", icon: CloudSnow, color: "#9FB3C8" },
+  61: { label: "Light rain", icon: CloudRain, color: "#4FE3FF" },
+  63: { label: "Rain", icon: CloudRain, color: "#4FE3FF" },
+  65: { label: "Heavy rain", icon: CloudRain, color: "#4FE3FF" },
+  66: { label: "Freezing rain", icon: CloudSnow, color: "#9FB3C8" },
+  67: { label: "Freezing rain", icon: CloudSnow, color: "#9FB3C8" },
+  71: { label: "Light snow", icon: CloudSnow, color: "#E4F3FF" },
+  73: { label: "Snow", icon: CloudSnow, color: "#E4F3FF" },
+  75: { label: "Heavy snow", icon: CloudSnow, color: "#E4F3FF" },
+  77: { label: "Snow grains", icon: CloudSnow, color: "#E4F3FF" },
+  80: { label: "Rain showers", icon: CloudRain, color: "#4FE3FF" },
+  81: { label: "Rain showers", icon: CloudRain, color: "#4FE3FF" },
+  82: { label: "Violent showers", icon: CloudRain, color: "#4FE3FF" },
+  85: { label: "Snow showers", icon: CloudSnow, color: "#E4F3FF" },
+  86: { label: "Snow showers", icon: CloudSnow, color: "#E4F3FF" },
+  95: { label: "Thunderstorm", icon: CloudLightning, color: "#FF8FA3" },
+  96: { label: "Thunderstorm + hail", icon: CloudLightning, color: "#FF8FA3" },
+  99: { label: "Thunderstorm + hail", icon: CloudLightning, color: "#FF8FA3" },
+};
+const WMO_ICON = (code) => WMO[code] || { label: "Unknown", icon: CloudSun, color: "#9FB3C8" };
+const DEFAULT_POS = { lat: 12.9165, lon: 79.1325 }; // Vellore, Tamil Nadu
+
+function useWeather(lat, lon) {
+  const [weather, setWeather] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const busy = useRef(false);
+  useEffect(() => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      if (busy.current) return;
+      busy.current = true;
+      try {
+        const w = await api.getWeather(lat, lon);
+        if (!cancelled) setWeather(w);
+      } catch {
+        if (!cancelled) setWeather({ source: "fallback", error: "unreachable" });
+      } finally {
+        busy.current = false;
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [lat, lon]);
+  return { weather, loading };
+}
+
+function LiveWeather({ lat, lon, label }) {
+  const { weather, loading } = useWeather(lat, lon);
+  const cur = weather?.current;
+  const daily = weather?.daily;
+  const W = WMO_ICON(cur?.weather_code);
+  const WIcon = W.icon;
+  const hourlyNow = new Date().getHours();
+
+  return (
+    <Card title={label || "Live weather"} icon={Thermometer} style={{ height: "100%" }}
+      extra={
+        <span className="g-kpi-sub" style={{ fontSize: 10.5 }}>
+          {weather?.source === "open-meteo" ? "Open-Meteo · GPS" : weather?.source === "fallback" ? "Offline demo data" : "…"}
+        </span>
+      }
+    >
+      {loading && !weather ? (
+        <div className="g-weather-loading"><Loader2 size={18} className="g-spin" style={{ color: C.cyan }} /><span>Fetching weather for your location…</span></div>
+      ) : !cur ? (
+        <p className="g-kpi-sub" style={{ margin: 0 }}>Weather unavailable for this location {weather?.error ? `(${weather.error})` : ""} — real feed will appear once the GPS fix is live.</p>
+      ) : (
+        <>
+          <div className="g-weather-now">
+            <WIcon size={46} style={{ color: W.color }} strokeWidth={1.75} />
+            <div className="g-weather-temp-line">
+              <span className="g-weather-temp g-mono">{Math.round(cur.temperature_2m)}°C</span>
+              <span className="g-weather-feels">feels like {Math.round(cur.apparent_temperature)}°C · {W.label}</span>
+            </div>
+          </div>
+          <div className="g-weather-metrics">
+            <div className="g-weather-metric"><Droplets size={12} style={{ color: C.cyan }} /><span>Humidity</span><b className="g-mono">{cur.relative_humidity_2m != null ? `${Math.round(cur.relative_humidity_2m)}%` : "—"}</b></div>
+            <div className="g-weather-metric"><Wind size={12} style={{ color: C.amber }} /><span>Wind</span><b className="g-mono">{cur.wind_speed_10m != null ? `${cur.wind_speed_10m.toFixed(0)} km/h` : "—"}</b></div>
+            <div className="g-weather-metric"><Compass size={12} style={{ color: C.green }} /><span>Rain now</span><b className="g-mono">{cur.precipitation != null ? `${cur.precipitation.toFixed(1)} mm` : "—"}</b></div>
+            <div className="g-weather-metric"><Gauge size={12} style={{ color: C.textDim }} /><span>Pressure</span><b className="g-mono">{cur.surface_pressure != null ? `${Math.round(cur.surface_pressure)} hPa` : "—"}</b></div>
+          </div>
+          {daily && (
+            <div className="g-weather-week" style={{ marginTop: 10 }}>
+              {daily.time.map((d, i) => {
+                const DW = WMO_ICON(daily.weather_code[i]);
+                const DIcon = DW.icon;
+                const date = new Date(d + (weather?.location ? "T12:00:00" : ""));
+                return (
+                  <div className="g-weather-day" key={d}>
+                    <span className="g-weather-day-name">{i === 0 ? "Today" : date.toLocaleDateString("en-IN", { weekday: "short" })}</span>
+                    <DIcon size={16} style={{ color: DW.color }} />
+                    <span className="g-weather-day-temp g-mono"><span style={{ color: C.text }}>{Math.round(daily.temperature_2m_max[i])}°</span> <span style={{ color: C.textDimmer }}>{Math.round(daily.temperature_2m_min[i])}°</span></span>
+                    {daily.precipitation_probability_max != null && <span className="g-weather-day-rain">{Math.round(daily.precipitation_probability_max[i])}%</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+/* ---- weather-aware helpers for charge planning ---- */
+function rangeTempImpact(tempC) {
+  if (tempC == null) return { delta: 0 };
+  if (tempC <= 5) return { delta: -18 };
+  if (tempC <= 15) return { delta: -8 };
+  if (tempC >= 38) return { delta: -10 };
+  if (tempC >= 33) return { delta: -5 };
+  return { delta: 0 };
+}
 
 /* ---------------------------------------------------------------- */
 /*  Small shared building blocks                                     */
@@ -672,7 +804,7 @@ function DashboardLoadState({ error }) {
   );
 }
 
-function Card({ title, icon: Icon, action, children, style, exportable, onExport, customizable, onCustomize }) {
+function Card({ title, icon: Icon, action, children, style, exportable, onExport, customizable, onCustomize, extra }) {
   return (
     <div className={`g-card ${customizable ? 'g-card-customizable' : ''}`} style={style}>
       {(title || Icon) && (
@@ -682,6 +814,7 @@ function Card({ title, icon: Icon, action, children, style, exportable, onExport
             <span>{title}</span>
           </div>
           <div className="g-card-actions">
+            {extra}
             {customizable && (
               <button className="g-card-customize-btn" onClick={onCustomize} title="Customize widget">
                 <MoreVertical size={14} />
@@ -2839,6 +2972,25 @@ function DriverChargersPage({ preferences }) {
         </div>
       </Card>
 
+      <div className="g-grid g-grid-2" style={{ marginBottom: 16 }}>
+        <LiveWeather
+          lat={geo.loc ? geo.loc.lat : DEFAULT_POS.lat}
+          lon={geo.loc ? geo.loc.lng : DEFAULT_POS.lon}
+          label={geo.loc ? "Live weather · your GPS location" : "Live weather · Vellore (default)"}
+        />
+        <Card title="Weather-aware trip planner" icon={Thermometer} style={{ height: "100%" }}>
+          <p className="g-kpi-sub" style={{ margin: 0, lineHeight: 1.5 }}>
+            GRIDPULSE folds the real temperature at your location into range and charging estimates.
+            Extreme heat or cold cut battery efficiency and charging speed — the planner adds buffer
+            automatically so you're never caught short on an inter-city run.
+          </p>
+          <div className="g-insight" style={{ marginTop: 12 }}>
+            <Thermometer size={14} style={{ color: C.amber, flexShrink: 0, marginTop: 2 }} />
+            <span>Cold below 15°C, or heat above 33°C, trims real-world range by up to 10–18% on Li-ion packs.</span>
+          </div>
+        </Card>
+      </div>
+
       <div className="g-grid g-grid-3" style={{ marginBottom: 16 }}>
         <Card title="View mode" icon={LayoutDashboard}>
           <div className="g-view-mode-toggle">
@@ -3166,9 +3318,18 @@ function formatDuration(hoursFloat) {
 function DriverChargePlannerPage({ preferences }) {
   const { currentSoc, vehicleName, vehicleBatteryKwh, chargeProfiles } = useDriverData();
   const { fxRate, live, liveConnected } = useLiveData();
+  const geo = useGeolocation();
   const [leaveTime, setLeaveTime] = useState("07:30");
   const [targetSoc, setTargetSoc] = useState(80);
   const [profileKey, setProfileKey] = useState("balanced");
+
+  // Real-time weather at the driver's GPS fix shapes range + charging speed.
+  const { weather: weatherAt, loading: weatherLoading } = useWeather(
+    geo.loc ? geo.loc.lat : DEFAULT_POS.lat,
+    geo.loc ? geo.loc.lng : DEFAULT_POS.lon
+  );
+  const tempC = weatherAt?.current?.temperature_2m ?? null;
+  const tempImpact = rangeTempImpact(tempC);
 
   const profile = chargeProfiles.find((p) => p.key === profileKey);
 
@@ -3236,13 +3397,15 @@ function DriverChargePlannerPage({ preferences }) {
       offPeakSavings: savings,
       // smart-charging extras
       gridLoadKw, solarKw, gridBusy, drActive, liveConnected,
+      // weather edge (GPS -> live Open-Meteo)
+      tempC, tempImpact,
       solarShare: gridLoadKw != null && solarKw != null ? Math.round((solarKw / Math.max(gridLoadKw, 1)) * 100) : null,
       recommended: {
         peakAvoided: savings,
         note: null,
       },
     };
-  }, [leaveTime, targetSoc, profileKey, profile, preferences.currency, preferences.region, fxRate, liveConnected, live]);
+  }, [leaveTime, targetSoc, profileKey, profile, preferences.currency, preferences.region, fxRate, liveConnected, live, tempC, tempImpact]);
 
   const alreadyThere = plan.energyNeeded <= 0;
 
@@ -3488,6 +3651,17 @@ function DriverChargePlannerPage({ preferences }) {
                   </div>
                 ) : (
                   <p className="g-kpi-sub" style={{ margin: 0 }}>Grid signal offline — using standard tariff estimate. Reconnect the gateway for a live grid-aware plan.</p>
+                )}
+                {plan.tempC != null && (
+                  <div className="g-insight" style={{ marginTop: 12 }}>
+                    <Thermometer size={14} style={{ color: C.amber, flexShrink: 0, marginTop: 2 }} />
+                    <span>
+                      Live weather at your location: <b>{Math.round(plan.tempC)}°C</b>
+                      {plan.tempImpact.delta !== 0
+                        ? ` — range impact ${Math.abs(plan.tempImpact.delta)}% (${plan.tempImpact.delta > 0 ? "extra headroom" : "reduced range"}), keep this buffer in mind`
+                        : " — within the ideal battery band, no range adjustment needed."}
+                    </span>
+                  </div>
                 )}
               </div>
             </>
@@ -4255,7 +4429,7 @@ function OwnerGatewayPage() {
             <div>
               <span className="g-live-integrations-title"><Radio size={12} style={{ color: C.cyan }} /> Protocol gateway</span>
               <p className="g-kpi-sub" style={{ margin: "4px 0 0" }}>
-                Endpoint: <span className="g-mono">{API_BASE_URL}</span> · SSE stream + OCPP WebSocket on the same host.
+                Endpoint: <span className="g-mono">{ENDPOINT_LABEL}</span> · SSE stream + OCPP WebSocket on the same host.
               </p>
             </div>
             <span className={`g-live-pill ${liveConnected ? "g-live-pill-on" : ""}`}>
@@ -4379,7 +4553,7 @@ function OwnerOverviewPage({ preferences }) {
             })
           ) : (
             <div className="g-live-source" style={{ gridColumn: "1 / -1", justifyContent: "center", color: C.textDimmer }}>
-              Connecting to the protocol gateway at <span className="g-mono">{API_BASE_URL}</span>…
+              Connecting to the protocol gateway at <span className="g-mono">{ENDPOINT_LABEL}</span>…
             </div>
           )}
         </div>
@@ -4708,21 +4882,7 @@ function OwnerGridPage({ preferences }) {
             </AreaChart>
           </ResponsiveContainer>
         </Card>
-        <Card title="7-day forecast" icon={CloudSun}>
-          <div className="g-list">
-            {weatherForecast.map((d, i) => (
-              <div className="g-list-row" key={i}>
-                <div className="g-list-main">
-                  {d.condition === "rain"
-                    ? <CloudRain size={14} style={{ color: C.cyan }} />
-                    : <CloudSun size={14} style={{ color: C.amber }} />}
-                  <span>{d.day}</span>
-                </div>
-                <span className="g-list-sub">{d.high}° / {d.low}° · {d.rain}% rain</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <LiveWeather lat={12.9165} lon={79.1325} label="Live site weather · GPS" />
       </div>
 
       <div className="g-grid" style={{ gridTemplateColumns: "1fr", marginTop: 18 }}>
@@ -7171,6 +7331,22 @@ export default function GridPulseApp() {
         .g-sig-v{font-size:20px; font-weight:700; color:${C.text}; font-family:var(--mono);}
         .g-sig-sub{font-size:11px; color:${C.textDim}; font-weight:500; font-family:var(--sans);}
         .g-sig-l{font-size:11px; color:${C.textDim};}
+        @keyframes gspinkf{to{transform:rotate(360deg)}}
+        .g-spin{animation:gspinkf 1s linear infinite;}
+        .g-weather-loading{display:flex; align-items:center; gap:8px; color:${C.textDimmer}; font-size:12.5px;}
+        .g-weather-now{display:flex; align-items:center; gap:14px; margin-bottom:4px;}
+        .g-weather-temp-line{display:flex; flex-direction:column; gap:2px;}
+        .g-weather-temp{font-size:34px; font-weight:700; color:${C.text}; line-height:1;}
+        .g-weather-feels{font-size:12px; color:${C.textDim};}
+        .g-weather-metrics{display:grid; grid-template-columns:repeat(2,1fr); gap:6px 14px; margin-top:12px;}
+        .g-weather-metric{display:flex; align-items:center; gap:6px; font-size:11.5px; color:${C.textDimmer};}
+        .g-weather-metric b{margin-left:auto; color:${C.text}; font-size:12px; font-weight:600;}
+        .g-weather-week{display:flex; flex-direction:column; gap:4px; border-top:1px solid ${C.borderSoft}; padding-top:8px;}
+        .g-weather-day{display:flex; align-items:center; gap:8px; font-size:12px;}
+        .g-weather-day-name{width:56px; flex-shrink:0; color:${C.textDimmer};}
+        .g-weather-day svg{flex-shrink:0;}
+        .g-weather-day-temp{margin-left:auto; width:56px; text-align:right;}
+        .g-weather-day-rain{width:40px; text-align:right; color:${C.cyan}; font-family:var(--mono); font-size:11px;}
         .g-live-session-chips{display:flex; gap:6px; flex-wrap:wrap;}
         .g-chip-live{color:${C.cyan}; border-color:${C.cyan}55; background:${C.cyan}14; font-family:var(--mono); font-size:11.5px;}
         .g-locsearch-row{display:flex; align-items:center; gap:10px;}

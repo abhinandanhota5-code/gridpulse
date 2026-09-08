@@ -1,0 +1,16 @@
+{
+  "name": "gridpulse",
+  "version": "1.0.0",
+  "description": "GRIDPULSE — real-time EV charging analytics and fleet dashboards, federating OCPP, MODBUS, OpenADR, ISO 15118, VOLTTRON and ANPR.",
+  "license": "Apache-2.0",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "postinstall": "npm --prefix backend install && npm --prefix frontend install",
+    "build": "npm --prefix frontend run build",
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js"
+  }
+}

@@ -1,0 +1,102 @@
+name: build-desktop
+
+# Builds the downloadable GRIDPULSE Desktop installers.
+# - Windows (NSIS installer + zip) on windows-latest
+# - macOS (DMG + zip) for both Intel (x64) and Apple Silicon (arm64)
+# Trigger: push a tag like v1.0.0 (or run manually from the Actions tab).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+jobs:
+  windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build web frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Build desktop installers
+        working-directory: desktop
+        env:
+          ELECTRON_BUILDER_CACHE: "~/.cache/electron"
+        run: |
+          npm install --no-audit --no-fund
+          npm run dist:win
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gridpulse-windows
+          path: desktop/release/*.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+          - runner: macos-13
+            arch: x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build web frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Build desktop installers
+        working-directory: desktop
+        run: |
+          npm install --no-audit --no-fund
+          npx electron-builder --mac dmg zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gridpulse-macos-${{ matrix.arch }}
+          path: desktop/release/*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Attach to GitHub release
+    needs: [windows, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Attach installers to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.{exe,dmg}
+          generate_release_notes: true

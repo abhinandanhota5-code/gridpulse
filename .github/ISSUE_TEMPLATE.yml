@@ -1,0 +1,49 @@
+---
+name: Bug report
+about: Report a broken dashboard, crash, or incorrect live data
+title: "[Bug] "
+labels: bug
+assignees: ""
+---
+
+**Describe the bug**
+A clear and concise description of what's broken.
+
+**To reproduce**
+Steps to reproduce the behavior:
+1. Log in as `...` — 2. Open `...` page — 3. Do `...` — 4. See error
+
+**Expected behavior**
+What should have happened instead.
+
+**Screenshots / video**
+If applicable, add screenshots or a short recording.
+
+**Environment**
+- OS / browser: (e.g. Safari 18 / Arc / Chrome)
+- Mode: local (`npm run dev`) or deployed URL
+- Backend `/api/health` status: ok / unreachable
+
+**Additional context**
+Any console errors, relevant endpoint responses, or logs.
+
+---
+name: Feature request
+about: Suggest a new page, integration, or protocol feed
+title: "[Feature] "
+labels: enhancement
+assignees: ""
+---
+
+**Problem**
+What currently doesn't work well or doesn't exist?
+
+**Proposed solution**
+Describe the feature and how it should behave for the user.
+
+**Alternative approaches**
+Anything else you considered.
+
+**Integration notes (if applicable)**
+Which protocol this touches — OCPP, MODBUS, OpenADR, ISO 15118, VOLTTRON,
+ANPR — and where it should surface in the UI.

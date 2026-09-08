@@ -1,14 +1,15 @@
-// Set VITE_API_URL in your .env (locally) and in Vercel's project env vars.
-// Example: https://gridpulse-backend.onrender.com
-// Keep these two in sync if you change deployment infra.
-export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+// Set VITE_API_URL in .env for local dev (e.g. http://localhost:4000).
+// In the single-service deploy the backend serves the frontend, so requests
+// go to the same origin (empty base), and WS derives ws(s): from it.
+export const API_BASE_URL = import.meta.env.VITE_API_URL || "";
 
 export const STREAM_URL = `${API_BASE_URL}/api/stream`;
 
 // Derive the ws(s): base for OCPP/WebSocket clients from the API base URL,
 // so a single VITE_API_URL env var controls both HTTP and WS in deploy.
 export function wsBaseUrl() {
-  return API_BASE_URL.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+  const base = API_BASE_URL || (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.host}` : "");
+  return base.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
 }
 
 async function request(path, options) {
@@ -27,6 +28,7 @@ export const api = {
   getOwnerData: () => request("/api/owner"),
   getLive: () => request("/api/live"),
   getFx: () => request("/api/fx"),
+  getWeather: (lat, lon) => request(`/api/weather?lat=${lat}&lon=${lon}`),
   getAnpr: () => request("/api/anpr"),
   postPlateEvent: (plateEvent) =>
     request("/api/v1/plate-events", {

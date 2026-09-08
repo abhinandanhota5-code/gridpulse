@@ -1,105 +1,102 @@
-# GRIDPULSE — split repo
+# GRIDPULSE
 
-The original single-file `GridPulseApp.jsx` is now two deployable pieces
-backed by a real-time **protocol gateway** (OCPP CSMS, MODBUS master,
-OpenADR VTN, ANPR, and Josev/VOLTTRON ingest bridges):
+Live EV-charging dashboards for drivers and fleet owners, backed by a real-time
+**protocol gateway** that speaks OCPP, MODBUS, OpenADR, ISO 15118 (Josev),
+VOLTTRON and ANPR right out of the box.
+
+- **Driver view** — live charger map, GPS + realtime weather trip planner,
+  smart charge planner (grid/solar/demand-response aware), predictive insights.
+- **Owner view** — fleet/grid/energy/battery/alerts/theft monitoring with live
+  protocol telemetry and forecasting.
+- **One deployable unit** — the backend serves the built frontend (single
+  service for Render or any Node host).
+- **Desktop app** — bundled, double-click install for macOS & Windows, with a
+  built-in Setup guide; ships everything needed, no Node.js install required.
+
+## Repo layout
 
 ```
-backend/    Express + WebSocket API (mock data + live protocol feeds) → Render
-frontend/   Vite + React UI (fetches from the API, SSE-live)           → Vercel
+backend/    Express + WebSocket API — HTTP, SSE live stream, OCPP CSMS,
+            MODBUS master, OpenADR VTN (2.0b), ANPR, FX + weather proxies
+frontend/   Vite + React UI (fetches from the API, SSE-live)
 scripts/    Demo simulators for every protocol endpoint
+desktop/    Electron shell that bundles the backend + UI into an installer
 ```
 
-## Why this split
-
-- **`backend/`** owns all the data: charging history, FASTag transactions,
-  fleet/charger status, grid load, theft detection, weather — everything that
-  used to be hardcoded arrays at the top of the React file. Swap the arrays
-  in `backend/data.js` for real DB/OCPP queries whenever you're ready; the
-  route shapes (`/api/driver`, `/api/owner`) don't need to change.
-- **`frontend/`** owns the UI only. It fetches those two bundles once (via
-  `DataContext.jsx`) and every page component pulls what it needs through
-  `useDriverData()` / `useOwnerData()` instead of reading module constants.
-
-## Running both locally
+## Run from source (dev)
 
 ```bash
-# terminal 1
-cd backend
-npm install
-npm run dev            # http://localhost:4000 (HTTP + OCPP WebSocket)
+# terminal 1 — backend (HTTP + OCPP WebSocket)
+cd backend && npm install && npm run dev        # http://localhost:4000
 
-# terminal 2
-cd frontend
-npm install
-cp .env.example .env   # VITE_API_URL=http://localhost:4000
-npm run dev            # http://localhost:5173
+# terminal 2 — frontend (Vite dev server)
+cd frontend && npm install && npm run dev        # http://localhost:5173
+```
+
+## Run as a single service (production shape)
+
+```bash
+npm install          # installs backend + frontend deps (root postinstall)
+npm run build        # builds frontend/dist
+npm start            # node backend/server.js  → serves UI + API on :4000
 ```
 
 ## Live protocol demo
 
-Log in as **Fleet Manager** → **Overview** to see the *Live integrations*
-panel, or **Settings** → *ANPR connection* for the live plate feed. Start
-each protocol simulator in its own terminal:
+Log in as **Fleet Manager** → **Overview** to see the *Live integrations* panel.
+Start each simulator in its own terminal (they auto-point at `localhost:4000`):
 
 ```bash
-# OCPP 1.6 charger       -> boot/transaction/meter-values on /ocpp
-node scripts/ocpp-sim.js
-
-# ANPR bay cameras      -> POST /api/v1/plate-events (built-in demo streamer
-#                          also runs by default as ANPR_DEMO=on)
-node scripts/anpr-sim.js
-
-# MODBUS energy meters  -> drives /api/modbus/sim (the backend master also
-#                          polls a real Open ModSim TCP slave on :1502)
-node scripts/modbus-sim.js
-
-# OpenADR 2.0b VEN      -> EiRegisterParty + EiEvent poll + EiOpt against /openadr
-node scripts/ven-node.js
-
-# Josev (ISO 15118) + VOLTTRON ingest bridges
-node scripts/ingest-bridges.js
+node scripts/ocpp-sim.js         # OCPP 1.6/2.0.1 charge points (4 stations)
+node scripts/modbus-sim.js       # energy meters → /api/modbus/sim
+node scripts/ven-node.js         # OpenADR 2.0b VEN (register/poll/opt)
+node scripts/ingest-bridges.js   # Josev (ISO 15118) + VOLTTRON ingest
 ```
 
-- The OCPP CSMS speaks real OCPP 1.6J / 2.0.1 over WebSocket. Point
-  `ocpp-ws-simulator` or a real charger at `ws://<host>/ocpp/{stationId}`.
-- Live snapshots stream to the UI over SSE (`GET /api/stream`), fallback to a
-  10 s poll in `DataContext.jsx`.
-- OpenADR XML endpoints: `POST /openadr/ei/register`,
-  `POST /openadr/ei/event` (EiPoll → DistributeEvent), `POST /openadr/ei/opt`.
-- Ingest bridges: `POST /api/ingest/josev`, `POST /api/ingest/volttron`,
-  optionally protected by the `INGEST_TOKEN` env var (`x-ingest-token` header).
-- Backend env knobs: `PORT`, `CORS_ORIGIN`, `MODBUS_HOST/PORT/POLL_MS`,
-  `ANPR_DEMO=off`, `INGEST_TOKEN`.
+- OCPP CSMS speaks real OCPP 1.6J / 2.0.1 over WebSocket; point a charger at
+  `ws://<host>/ocpp/{stationId}`.
+- Live snapshots stream to the UI over SSE (`GET /api/stream`), with a 10 s poll
+  fallback in `DataContext.jsx`.
+- OpenADR XML endpoints: `POST /openadr/ei/register`, `POST /openadr/ei/event`,
+  `POST /openadr/ei/opt`. Ingest: `POST /api/ingest/josev`,
+  `POST /api/ingest/volttron` (optional `x-ingest-token` auth).
+- Realtime, keyless: USD→INR via `backend/fx.js`, weather via `backend/weather.js`
+  (Open-Meteo proxy at `GET /api/weather?lat=&lon=`).
+- Backend env knobs: `PORT`, `CORS_ORIGIN`, `INGEST_TOKEN`, `MODBUS_HOST/PORT`,
+  `ANPR_DEMO=off`, `GRIDPULSE_DIST`.
 
-## Deploying
+## Desktop app (downloadable, zero-setup)
 
-1. **Backend → Render**: see `backend/README.md`. You'll end up with a URL
-   like `https://gridpulse-backend.onrender.com`.
-2. **Frontend → Vercel**: see `frontend/README.md`. Set `VITE_API_URL` to the
-   Render URL from step 1.
-3. Back on Render, set `CORS_ORIGIN` to your Vercel URL so the browser is
-   allowed to call the API.
+`desktop/` is an Electron shell. It boots the bundled backend on a local port,
+auto-starts the protocol simulators so every dashboard is alive, and opens the
+UI in a native window (the on-screen **Setup guide** explains core requirements
+and what to download if a component is genuinely missing).
 
-## What changed vs. the single-file version
+```bash
+cd desktop && npm install
+npm run start          # run from source
+npm run dist:mac       # build macOS DMG + zip
+npm run dist:win       # build Windows NSIS + zip
+```
 
-- All mock data arrays moved from the top of `GridPulseApp.jsx` into
-  `backend/data.js`, served via `GET /api/driver` and `GET /api/owner`.
-- Design tokens (`C`, `STATUS_COLOR`, `CONFIDENCE_COLOR`) moved to
-  `frontend/src/theme.js`.
-- New real-time protocol gateway in `backend/`: `ocpp.js` (CSMS on the same
-  HTTP server), `modbus.js` (TCP master), `openadr.js` (minimal 2.0b VTN),
-  `anpr.js` (plate-events service + demo streamer), `live.js` (in-memory hub
-  + SSE fan-out), and `merge.js` (overlays live feeds on `/api/driver` +
-  `/api/owner`).
-- The three charge-planner profile icons (Zap/Gauge/Leaf) are attached
-  client-side in `DataContext.jsx`, since icon components can't be sent as
-  JSON — the backend just sends an `iconKey` string.
-- `DataContext.jsx` now also subscribes to the live stream and exposes
-  `useLiveData()` (sources, stations, ANPR, DR events).
-- Settings OCPP/ANPR tests are real now (WebSocket BootNotification handshake
-  / live plate-event POST), endpoints default to `wsBaseUrl()/ocpp/{id}` and
-  `${API_BASE_URL}/api/v1/plate-events`.
-- Login (`LoginScreen`) still works the same locally; a `POST /api/auth/login`
-  mock route exists in the backend if/when you want the frontend to call out
-  for auth instead of setting session state directly.
+Windows installers are also produced automatically by CI (`.github/workflows/
+build-desktop.yml`) when you push a `v*` tag — see the **Releases** tab.
+
+## Deploying to Render (single service)
+
+1. Push this repo (or connect it) to Render as a **Web Service**.
+2. `render.yaml` is included — Render will read it automatically:
+   build `npm install && npm run build`, start `node backend/server.js`,
+   health check at `/api/health`.
+3. Add-secret env vars as needed: `INGEST_TOKEN`, `CORS_ORIGIN`.
+
+## Demos to try
+
+| Account | Password | What it shows |
+| --- | --- | --- |
+| `TN84DR5021` | `demo123` | Driver: live chargers, GPS + weather planner, smart charging |
+| `GRIDPULSE` | `owner123` | Owner: grid/energy/alerts/theft + predictive insights |
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE) and [CONTRIBUTING.md](CONTRIBUTING.md).
