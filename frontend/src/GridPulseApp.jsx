@@ -10,7 +10,7 @@ import {
   LayoutDashboard, Settings, Timer, Leaf, BarChart3, History, Radio,
   ArrowUpRight, ArrowDownRight, BatteryCharging, Bell, ShieldOff,
   CloudRain, CloudSun, Droplets, Thermometer, Eye, CreditCard, Wallet, Users, Target, Fuel,
-  Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu, Apple,
+  Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu,
   LocateFixed, RefreshCw, Navigation, FileText, Upload, ShieldCheck, BadgeCheck, CalendarDays
 } from "lucide-react";
 
@@ -195,16 +195,29 @@ function getVehicleSpecs(vehicle) {
   const model = vehicle?.model || "EV vehicle";
   const specsByModel = {
     "Nexon EV": { battery: "40.5 kWh", usable: "38.0 kWh", range: "465 km", ac: "7.2 kW", dc: "60 kW", warranty: "8 years / 160,000 km" },
+    "Curvv EV": { battery: "55 kWh", usable: "52.3 kWh", range: "585 km", ac: "7.2 kW", dc: "150 kW", warranty: "8 years / 160,000 km" },
     "Punch EV": { battery: "35 kWh", usable: "33.5 kWh", range: "421 km", ac: "7.2 kW", dc: "50 kW", warranty: "8 years / 160,000 km" },
+    "Harrier EV": { battery: "60 kWh", usable: "57.5 kWh", range: "500 km", ac: "7.2 kW", dc: "150 kW", warranty: "8 years / 160,000 km" },
     "Tiago EV": { battery: "24 kWh", usable: "21.9 kWh", range: "315 km", ac: "7.2 kW", dc: "50 kW", warranty: "8 years / 160,000 km" },
+    "e Vitara": { battery: "49 kWh", usable: "47.0 kWh", range: "440 km", ac: "7.2 kW", dc: "80 kW", warranty: "8 years / 160,000 km" },
+    "Creta Electric": { battery: "42 kWh", usable: "40.3 kWh", range: "390 km", ac: "11 kW", dc: "100 kW", warranty: "8 years / 160,000 km" },
     IONIQ5: { battery: "72.6 kWh", usable: "70.0 kWh", range: "631 km", ac: "11 kW", dc: "220 kW", warranty: "8 years / 160,000 km" },
     Kona: { battery: "48.4 kWh", usable: "46.0 kWh", range: "452 km", ac: "7.2 kW", dc: "100 kW", warranty: "8 years / 160,000 km" },
-    ZS: { battery: "50.3 kWh", usable: "49.0 kWh", range: "461 km", ac: "7.4 kW", dc: "50 kW", warranty: "8 years / 150,000 km" },
+    "Windsor EV": { battery: "38 kWh", usable: "36.1 kWh", range: "332 km", ac: "7.4 kW", dc: "50 kW", warranty: "8 years / 150,000 km" },
+    "ZS EV": { battery: "50.3 kWh", usable: "49.0 kWh", range: "461 km", ac: "7.4 kW", dc: "50 kW", warranty: "8 years / 150,000 km" },
     Comet: { battery: "17.3 kWh", usable: "16.0 kWh", range: "230 km", ac: "3.3 kW", dc: "N/A", warranty: "8 years / 150,000 km" },
     XUV400: { battery: "39.4 kWh", usable: "37.9 kWh", range: "456 km", ac: "7.2 kW", dc: "50 kW", warranty: "8 years / 160,000 km" },
     BE6: { battery: "79 kWh", usable: "75 kWh", range: "682 km", ac: "11.2 kW", dc: "175 kW", warranty: "Lifetime battery warranty" },
+    "XEV 9e": { battery: "79 kWh", usable: "75 kWh", range: "682 km", ac: "11 kW", dc: "140 kW", warranty: "8 years / 160,000 km" },
     Atto3: { battery: "60.48 kWh", usable: "57.5 kWh", range: "521 km", ac: "7 kW", dc: "80 kW", warranty: "8 years / 160,000 km" },
     Seal: { battery: "82.56 kWh", usable: "78.5 kWh", range: "650 km", ac: "11 kW", dc: "150 kW", warranty: "8 years / 160,000 km" },
+    "eMax 7": { battery: "71.8 kWh", usable: "69.0 kWh", range: "530 km", ac: "7.4 kW", dc: "125 kW", warranty: "8 years / 160,000 km" },
+    EV6: { battery: "77.4 kWh", usable: "74.0 kWh", range: "528 km", ac: "11 kW", dc: "180 kW", warranty: "8 years / 160,000 km" },
+    EV9: { battery: "99.8 kWh", usable: "98.0 kWh", range: "501 km", ac: "11 kW", dc: "230 kW", warranty: "8 years / 160,000 km" },
+    EX30: { battery: "69 kWh", usable: "67.0 kWh", range: "480 km", ac: "11 kW", dc: "178 kW", warranty: "8 years / 160,000 km" },
+    EX40: { battery: "82 kWh", usable: "79.0 kWh", range: "475 km", ac: "11 kW", dc: "200 kW", warranty: "8 years / 160,000 km" },
+    "Model Y": { battery: "75 kWh", usable: "72.0 kWh", range: "555 km", ac: "11 kW", dc: "250 kW", warranty: "8 years / 160,000 km" },
+    "ë-C3": { battery: "29.2 kWh", usable: "27.0 kWh", range: "320 km", ac: "7.2 kW", dc: "50 kW", warranty: "8 years / 160,000 km" },
   };
   return { model, ...(specsByModel[model] || { battery: "40 kWh", usable: "38 kWh", range: "400 km", ac: "7.2 kW", dc: "60 kW", warranty: "8 years / 160,000 km" }) };
 }
@@ -243,10 +256,85 @@ function formatPlate(raw) {
   return s;
 }
 
+/* ---- RTO / registration-office inference from the plate prefix ---- */
+const STATE_BY_CODE = {
+  AN: "Andaman & Nicobar", AP: "Andhra Pradesh", AR: "Arunachal Pradesh", AS: "Assam",
+  BR: "Bihar", CG: "Chhattisgarh", CH: "Chandigarh", DD: "Daman & Diu", DL: "Delhi",
+  DN: "Dadra & Nagar Haveli", GA: "Goa", GJ: "Gujarat", HP: "Himachal Pradesh",
+  HR: "Haryana", JH: "Jharkhand", JK: "Jammu & Kashmir", KA: "Karnataka", KL: "Kerala",
+  LA: "Ladakh", LD: "Lakshadweep", MH: "Maharashtra", ML: "Meghalaya", MN: "Manipur",
+  MP: "Madhya Pradesh", MZ: "Mizoram", NL: "Nagaland", OD: "Odisha", PB: "Punjab",
+  PY: "Puducherry", RJ: "Rajasthan", SK: "Sikkim", TN: "Tamil Nadu", TR: "Tripura",
+  TS: "Telangana", UK: "Uttarakhand", UP: "Uttar Pradesh", WB: "West Bengal",
+};
+
+const RTO_CITY_BY_CODE = {
+  "AP13": "Tirupati", "AP16": "Guntur", "AP26": "Nellore", "AP31": "Visakhapatnam", "AP39": "Vijayawada",
+  "AS01": "Guwahati", "AS04": "Dibrugarh", "AS07": "Silchar", "AS02": "Nagaon",
+  "BR01": "Patna", "BR05": "Muzaffarpur", "BR26": "Gaya",
+  "CG01": "Raipur", "CG04": "Bilaspur", "CG02": "Ambikapur",
+  "CH01": "Chandigarh",
+  "DL01": "Delhi", "DL02": "Delhi", "DL03": "Delhi", "DL04": "Delhi", "DL05": "Delhi",
+  "DL06": "Delhi", "DL07": "Delhi", "DL08": "Delhi", "DL09": "Delhi", "DL10": "Delhi", "DL11": "Delhi",
+  "GA01": "Panaji", "GA02": "Margao",
+  "GJ01": "Ahmedabad", "GJ05": "Surat", "GJ06": "Rajkot", "GJ12": "Vadodara", "GJ18": "Gandhinagar",
+  "GJ27": "Mehsana", "GJ03": "Jamnagar", "GJ15": "Morbi",
+  "HR26": "Gurugram", "HR10": "Rohtak", "HR05": "Karnal", "HR51": "Manesar", "HR68": "Nuh",
+  "HP12": "Shimla", "HP07": "Kangra",
+  "JH01": "Ranchi", "JH05": "Jamshedpur", "JH02": "Bokaro", "JH10": "Dhanbad",
+  "JK01": "Jammu", "JK02": "Srinagar",
+  "KA01": "Bengaluru", "KA02": "Bengaluru", "KA03": "Bengaluru", "KA04": "Bengaluru", "KA05": "Bengaluru",
+  "KA41": "Bengaluru", "KA50": "Bengaluru", "KA51": "Bengaluru", "KA53": "Bengaluru", "KA57": "Bengaluru",
+  "KA13": "Mysuru", "KA14": "Mysuru", "KA19": "Mangaluru", "KA25": "Dharwad", "KA31": "Shivamogga",
+  "KL01": "Thiruvananthapuram", "KL03": "Kollam", "KL05": "Ernakulam", "KL07": "Thrissur",
+  "KL09": "Kozhikode", "KL11": "Kannur", "KL22": "Ernakulam",
+  "MH01": "Mumbai", "MH02": "Mumbai", "MH03": "Mumbai", "MH04": "Thane", "MH05": "Pune",
+  "MH07": "Nagpur", "MH12": "Pune", "MH14": "Pune", "MH15": "Nashik", "MH43": "Aurangabad",
+  "MP01": "Bhopal", "MP02": "Indore", "MP04": "Gwalior", "MP09": "Jabalpur",
+  "OD02": "Bhubaneswar", "OD05": "Cuttack", "OD01": "Khordha",
+  "PB01": "Amritsar", "PB02": "Jalandhar", "PB03": "Ludhiana", "PB04": "Patiala", "PB65": "Mohali",
+  "PY01": "Puducherry", "PY04": "Karaikal",
+  "RJ01": "Jaipur", "RJ14": "Jodhpur", "RJ04": "Ajmer", "RJ24": "Udaipur",
+  "TN01": "Chennai", "TN02": "Chennai", "TN04": "Chennai", "TN09": "Chennai", "TN10": "Chennai",
+  "TN11": "Chennai", "TN22": "Coimbatore", "TN23": "Vellore", "TN27": "Salem", "TN33": "Erode",
+  "TN37": "Madurai", "TN45": "Tiruchirappalli", "TN84": "Vellore",
+  "TS06": "Hyderabad", "TS07": "Hyderabad", "TS08": "Hyderabad", "TS09": "Hyderabad",
+  "TS10": "Hyderabad", "TS11": "Hyderabad",
+  "UK03": "Dehradun", "UK07": "Haridwar", "UK04": "Nainital",
+  "UP16": "Prayagraj", "UP32": "Lucknow", "UP65": "Ghaziabad", "UP70": "Noida", "UP78": "Agra",
+  "WB01": "Kolkata", "WB02": "Kolkata", "WB11": "Howrah",
+};
+
+function plateToRTO(raw) {
+  const s = normalizePlate(raw);
+  const m = s && s.match(/^([A-Z]{2})(\d{2})/);
+  if (!m) return null;
+  const code = `${m[1]}${m[2]}`;
+  const state = STATE_BY_CODE[m[1]] || m[1];
+  return {
+    stateCode: m[1],
+    districtCode: m[2],
+    state,
+    city: RTO_CITY_BY_CODE[code] || state,
+    label: RTO_CITY_BY_CODE[code] ? `${RTO_CITY_BY_CODE[code]}, ${state}` : state,
+  };
+}
+
 const EXSHOWROOM_PRICE_INR = {
   "Nexon EV": 1450000, "Punch EV": 1250000, "Tiago EV": 850000,
-  IONIQ5: 3890000, Kona: 2380000, ZS: 1850000, Comet: 800000,
-  XUV400: 1580000, BE6: 1990000, Atto3: 2799000, Seal: 4100000,
+  "Curvv EV": 1699000, "Harrier EV": 2490000,
+  "e Vitara": 1619000, "Creta Electric": 1803000,
+  IONIQ5: 5570000, Kona: 2380000,
+  "Windsor EV": 1470000, "ZS EV": 1850000, Comet: 800000,
+  XUV400: 1580000, BE6: 1990000, "XEV 9e": 2190000,
+  Atto3: 2799000, Seal: 4100000, "eMax 7": 2690000,
+  EV6: 6099000, EV9: 9100000,
+  EX30: 4100000, EX40: 4900000,
+  i4: 8000000, i5: 11000000, i7: 19500000, iX: 12000000,
+  EQB: 8100000, EQE: 14000000, EQS: 15300000, "EQS SUV": 15700000,
+  "Q8 e-tron": 11400000, "e-tron GT": 17000000,
+  Taycan: 19000000, Macan: 14700000,
+  "Cooper SE": 4590000, "ë-C3": 1200000, "Model Y": 5990000,
 };
 
 function daysFromNow(days) {
@@ -276,12 +364,15 @@ function createVehicleProfile(vehicle, registration = "") {
   const puc = daysFromNow(Math.round(30 + rand() * 240));
   const insurers = ["ICICI Lombard", "HDFC ERGO", "Digit General", "Tata AIG", "Bajaj Allianz"];
 
+  const rto = plateToRTO(registration || "");
+
   return {
     ...vehicle,
     specs,
     registration: formatPlate(registration),
     regRaw: normalizePlate(registration),
-    rtoCity: "Vellore, TN",
+    rtoCity: rto ? rto.label : "Vellore, TN",
+    rtoState: rto ? rto.state : "Tamil Nadu",
     color: ["Pearl White", "Midnight Blue", "Glacier Silver", "Fiery Red", "Phantom Grey"][Math.floor(rand() * 5)],
     purchaseYear,
     vehicleAge: Number(vehicleAge.toFixed(1)),
@@ -564,25 +655,71 @@ function LoginScreen({ onLogin }) {
 
   const vehicleCatalog = {
     Tata: {
-      "Nexon EV": ["Smart", "Smart+", "Smart+ S", "Fearless", "Fearless+ S", "Empowered", "Empowered+"],
+      "Nexon EV": ["Creative", "Pure", "Adventure", "Fearless", "Empowered", "Empowered+"],
+      "Curvv EV": ["Creative 45", "Pure 45", "Adventure 55", "Fearless 55", "Empowered 55"],
       "Punch EV": ["Smart", "Smart+", "Smart+ S", "Adventure", "Adventure S", "Empowered", "Empowered+"],
+      "Harrier EV": ["Adrenaline", "Fearless", "Empowered"],
       "Tiago EV": ["XE MR", "XT MR", "XT LR", "XZ+ Tech Lux LR"],
     },
-    Hyundai: {
-      IONIQ5: ["RWD", "RWD Long Range"],
-      Kona: ["Premium", "Premium Dual Tone"],
+    "Maruti Suzuki": {
+      "e Vitara": ["Delta", "Zeta", "Alpha"],
     },
-    MG: {
-      ZS: ["Executive", "Exclusive Plus", "Essence"],
-      Comet: ["Executive", "Excite", "Exclusive"],
+    Hyundai: {
+      "Creta Electric": ["Executive", "Executive Tech", "Smart", "Smart (O)", "Premium", "Excellence"],
+      IONIQ5: ["Xclusive"],
+      Kona: ["Premium", "Premium Dual Tone"],
     },
     Mahindra: {
       XUV400: ["EC Pro 34.5 kWh", "EL Pro 34.5 kWh", "EL Pro 39.4 kWh"],
       BE6: ["Pack One", "Pack Two", "Pack Three"],
+      "XEV 9e": ["Pack One", "Pack Two", "Pack Three"],
+    },
+    MG: {
+      "Windsor EV": ["Excite", "Exclusive", "Essence", "Exclusive Pro", "Essence Pro"],
+      "ZS EV": ["Executive", "Exclusive", "Exclusive Pro"],
+      Comet: ["Executive", "Excite", "Exclusive"],
     },
     BYD: {
       Atto3: ["Dynamic", "Premium", "Superior"],
       Seal: ["Dynamic", "Premium", "Performance"],
+      "eMax 7": ["Premium", "Superior"],
+    },
+    Kia: {
+      EV6: ["GT-Line"],
+      EV9: ["GT-Line"],
+    },
+    Volvo: {
+      EX30: ["RWD Ultra"],
+      EX40: ["Ultra"],
+    },
+    BMW: {
+      i4: ["eDrive40"],
+      i5: ["eDrive40 M Sport"],
+      i7: ["xDrive60 M Sport"],
+      iX: ["xDrive40", "xDrive50"],
+    },
+    "Mercedes-Benz": {
+      EQB: ["300 4MATIC"],
+      EQE: ["350 4MATIC", "500 4MATIC"],
+      EQS: ["580 4MATIC"],
+      "EQS SUV": ["580 4MATIC"],
+    },
+    Audi: {
+      "Q8 e-tron": ["50 quattro", "55 quattro"],
+      "e-tron GT": ["e-tron GT", "RS e-tron GT"],
+    },
+    Porsche: {
+      Taycan: ["Taycan", "4S", "Turbo"],
+      Macan: ["Macan 4", "Macan Turbo"],
+    },
+    Mini: {
+      "Cooper SE": ["Cooper SE"],
+    },
+    Citroën: {
+      "ë-C3": ["Feel", "Shine"],
+    },
+    Tesla: {
+      "Model Y": ["RWD", "Long Range AWD", "Performance"],
     },
   };
 
@@ -664,11 +801,6 @@ function LoginScreen({ onLogin }) {
     setIdentifier(demo.id);
     setPassword(demo.password);
     setError("");
-  }
-
-  function socialLogin(provider) {
-    setError("");
-    onLogin({ role, name: provider === "Google" ? "Google User" : "Apple User", provider, reg: normalizePlate(identifier) || undefined });
   }
 
   return (
@@ -837,15 +969,7 @@ function LoginScreen({ onLogin }) {
               </button>
             </div>
           )}
-          <div className="g-auth-divider"><span>or continue with</span></div>
-          <div className="g-social-actions">
-            <button type="button" className="g-social-btn" onClick={() => socialLogin("Google")}>
-              <span className="g-social-mark g-google-mark">G</span> Google
-            </button>
-            <button type="button" className="g-social-btn" onClick={() => socialLogin("Apple")}>
-              <Apple size={18} className="g-apple-mark" /> Apple
-            </button>
-          </div>
+          <div className="g-auth-divider"><span>Register with your registration number for instant vehicle sync</span></div>
         </div>
         <div className="g-login-foot">
           {role === "ev"
@@ -1300,7 +1424,7 @@ function DriverGaragePage({ preferences, vehicleProfile }) {
 
   const docs = [
     { icon: CreditCard, name: "Driving licence", no: "DL-07-2023-4X9A11", meta: "Valid till 17 Sep 2033", status: "Verified" },
-    { icon: FileText, name: "Registration (RC)", no: plate, meta: v.rtoCity ? `Registered at ${v.rtoCity} RTO` : "Electric · Green category", status: "Verified" },
+    { icon: FileText, name: "Registration (RC)", no: plate, meta: v.rtoCity ? `Registered at ${v.rtoCity}` : "Electric · Green category", status: "Verified" },
     { icon: ShieldCheck, name: "Insurance policy", no: ins.policyNo || "—", meta: ins.validTill || "—", status: ins.status === "Active" ? "Verified" : "Needs renewal" },
     { icon: FileText, name: "PUC certificate", no: puc.certNo || "—", meta: puc.validTill || "—", status: puc.status === "Valid" ? "Verified" : "Needs renewal" },
   ];
@@ -4390,45 +4514,151 @@ function OwnerPredictiveInsightsPage({ onNavigate }) {
   );
 }
 
-function ProductCard({ icon: Icon, title, tagline, points, badge, onConfigure, liveStatus }) {
+function ProductCard({ icon: Icon, title, tagline, points, badge, onConfigure, liveStatus, onOpen, hoverHint }) {
   return (
-    <Card title={title} icon={Icon}>
-      <div className="g-product-card">
-        {badge && (
-          <span className="g-badge" style={{
-            color: C.cyan, borderColor: `${C.cyan}55`, background: C.cyanSoft,
-            alignSelf: "flex-start", marginBottom: 12,
-          }}>{badge}</span>
-        )}
-        {liveStatus && (
-          <div className="g-products-live">
-            <span className="g-dot" style={{ background: liveStatus.color, boxShadow: `0 0 8px ${liveStatus.color}99` }} />
-            <span className="g-mono" style={{ fontSize: 10.5, color: liveStatus.color }}>{liveStatus.text}</span>
-          </div>
-        )}
-        <p className="g-kpi-sub" style={{ marginBottom: 14, fontSize: 12.5, lineHeight: 1.55 }}>{tagline}</p>
-        <div className="g-list">
-          {points.map((p, i) => (
-            <div className="g-list-row" key={i} style={{ padding: "8px 0" }}>
-              <div className="g-list-main">
-                <CheckCircle2 size={13} style={{ color: C.green, flexShrink: 0 }} />
-                <span style={{ fontSize: 12.5 }}>{p}</span>
-              </div>
+    <div
+      className="g-product-card-wrap"
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      aria-label={`${title} — click to learn what it does and how it works`}
+      onKeyDown={(e) => {
+        if (onOpen && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+    >
+      <Card title={title} icon={Icon}>
+        <div className="g-product-card">
+          {badge && (
+            <span className="g-badge" style={{
+              color: C.cyan, borderColor: `${C.cyan}55`, background: C.cyanSoft,
+              alignSelf: "flex-start", marginBottom: 12,
+            }}>{badge}</span>
+          )}
+          {liveStatus && (
+            <div className="g-products-live">
+              <span className="g-dot" style={{ background: liveStatus.color, boxShadow: `0 0 8px ${liveStatus.color}99` }} />
+              <span className="g-mono" style={{ fontSize: 10.5, color: liveStatus.color }}>{liveStatus.text}</span>
             </div>
-          ))}
+          )}
+          <p className="g-kpi-sub" style={{ marginBottom: 14, fontSize: 12.5, lineHeight: 1.55 }}>{tagline}</p>
+          <div className="g-list">
+            {points.map((p, i) => (
+              <div className="g-list-row" key={i} style={{ padding: "8px 0" }}>
+                <div className="g-list-main">
+                  <CheckCircle2 size={13} style={{ color: C.green, flexShrink: 0 }} />
+                  <span style={{ fontSize: 12.5 }}>{p}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="g-product-footer">
+            {onConfigure && (
+              <button
+                type="button"
+                className="g-product-link"
+                onClick={(e) => { e.stopPropagation(); onConfigure(); }}
+              >
+                Configure in Settings <ChevronRight size={14} />
+              </button>
+            )}
+            {onOpen && (
+              <button
+                type="button"
+                className="g-product-link g-product-link-more"
+                onClick={(e) => { e.stopPropagation(); onOpen(); }}
+              >
+                <Info size={13} /> {hoverHint || "What it does & how it works"}
+              </button>
+            )}
+          </div>
         </div>
-        {onConfigure && (
-          <button type="button" className="g-product-link" onClick={onConfigure}>
-            Configure in Settings <ChevronRight size={14} />
-          </button>
-        )}
-      </div>
-    </Card>
+      </Card>
+    </div>
   );
 }
 
-function OwnerProductsPage({ goToSettings }) {
+function ProductBriefModal({ product, onClose, onNavigate }) {
+  if (!product) return null;
+  return (
+    <div className="g-modal-overlay" onClick={onClose}>
+      <div className="g-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="g-modal-header">
+          <h2 className="g-modal-title">{product.title}</h2>
+          {product.live && (
+            <span className="g-product-live-pill">
+              <span className="g-dot" style={{ background: product.live.color, boxShadow: `0 0 8px ${product.live.color}99` }} />
+              <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: product.live.color }}>{product.live.text}</span>
+            </span>
+          )}
+          <button className="g-btn-ghost" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="g-modal-body">
+          <div className="g-brief-hero">
+            <div className="g-brief-hero-label">ONE-LINE SUMMARY</div>
+            <p>{product.tagline}</p>
+          </div>
+
+          <div className="g-brief-sec">
+            <div className="g-brief-label">What it does</div>
+            <p className="g-brief-copy">{product.what}</p>
+          </div>
+
+          <div className="g-brief-sec">
+            <div className="g-brief-label">How it works</div>
+            <ol className="g-brief-steps">
+              {product.how.map((step, i) => (
+                <li key={i}>{step}</li>
+              ))}
+            </ol>
+          </div>
+
+          <div className="g-brief-sec">
+            <div className="g-brief-label">Under the hood</div>
+            <p className="g-brief-copy g-brief-data">{product.data}</p>
+          </div>
+
+          {product.points && (
+            <div className="g-brief-sec">
+              <div className="g-brief-label">Highlights</div>
+              <div className="g-list">
+                {product.points.map((p, i) => (
+                  <div className="g-list-row" key={i} style={{ padding: "7px 0" }}>
+                    <div className="g-list-main">
+                      <CheckCircle2 size={13} style={{ color: C.green, flexShrink: 0 }} />
+                      <span style={{ fontSize: 12.5 }}>{p}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="g-brief-actions">
+            {product.action && (
+              <button
+                type="button"
+                className="g-btn-primary"
+                onClick={() => { const page = product.action; onClose(); onNavigate(page); }}
+              >
+                {product.actionLabel || "See it in action"} <ChevronRight size={14} />
+              </button>
+            )}
+            <button type="button" className="g-btn-ghost" onClick={onClose}>Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OwnerProductsPage({ goToSettings, onNavigate }) {
   const { live, liveConnected } = useLiveData();
+  const [openProduct, setOpenProduct] = useState(null);
 
   const liveStatus = (key) => {
     const s = live?.sources?.[key];
@@ -4439,59 +4669,217 @@ function OwnerProductsPage({ goToSettings }) {
     return { color, text: `${s.status === "connected" || s.status === "active" ? "LIVE" : s.status.toUpperCase()} · ${s.detail || "waiting"}` };
   };
 
+  const OCPP_BRIEF = {
+    title: "OCPP connectivity",
+    what: "OCPP (Open Charge Point Protocol) is the standard language between charging stations and the network. This module keeps every charger in the fleet connected to GRIDPULSE over a secure WebSocket, so the platform can supervise sessions and push commands to hardware at any time.",
+    how: [
+      "The charger opens a secure WebSocket to the GRIDPULSE gateway when it powers up and registers itself (BootNotification).",
+      "The gateway replies with the liveness heartbeat interval, starting a two-way keep-alive loop.",
+      "Every StatusNotification and TransactionEvent the charger emits is parsed, validated, and written into the live station snapshot you see on the dashboards.",
+      "Operator actions (start/stop, set charging profile, firmware update) are sent back down the same socket as RemoteStart, RemoteStop, or SetChargingProfile calls.",
+      "If a charger drops offline, its station flips to Offline on every dashboard and alerts are raised automatically.",
+    ],
+    data: "OCPP 1.6J and 2.0.1 — the simulator runs a compact charger stack that streams real StatusNotification, Heartbeat and TransactionEvent messages over one WebSocket per station.",
+    points: ["OCPP 1.6J & 2.0.1 support", "Remote start/stop and firmware push", "Smart charging profiles & load balancing"],
+    action: "gateway",
+    actionLabel: "See it live in the gateway",
+  };
+
+  const ANPR_BRIEF = {
+    title: "ANPR vehicle recognition",
+    what: "Automatic Number Plate Recognition watches the camera feed as a vehicle pulls into a bay, reads its plate, and matches it to the charging session. That makes session start and billing tap-free and it feeds the energy-theft cross-check engine with who actually used a bay.",
+    how: [
+      "A frame is captured from the bay camera the moment a vehicle (or a change in presence) is detected.",
+      "The image is normalised — cropped to the plate region, de-skewed, and enhanced — then a text-recognition model extracts the registration string.",
+      "The recognised plate is matched against the session started at that connector; the match is stored with a confidence score.",
+      "Matched plates bill the right account automatically; unmatched plates raise a 'unregistered/unmatched plate' alert for the operator.",
+      "The plate match is then cross-checked against expected energy consumption, flagging bays where a different vehicle seems to be draining power.",
+    ],
+    data: "Runs as a local inference service (streaming ANPR feed) bridged into the backend via the ANPR source; each detection carries plateConf (high/medium/unmatched).",
+    points: ["Tap-free session start & billing", "Unregistered/unmatched plate alerts", "Feeds the energy-theft cross-check engine"],
+    action: "charging",
+    actionLabel: "See live sessions & plates",
+  };
+
+  const CMS_BRIEF = {
+    title: "Charge Management System",
+    what: "The CMS is the operator console layer — the place fleet and site owners monitor, schedule, and troubleshoot every charger from a single view instead of walking the site. It turns raw station telemetry into health, revenue, and maintenance decisions.",
+    how: [
+      "Each charger reports status, connector state, power draw, and session events up through OCPP to the gateway.",
+      "The CMS aggregates those into the live fleet view — per-site health, active sessions, utilisation, and revenue.",
+      "Rules on the console enforce grid guardrails (peak caps, demand-response windows) by pushing SetChargingProfile commands back to the chargers.",
+      "Failure patterns (repeated offline cycles, hot connectors, stuck transactions) are scored into a predictive maintenance queue.",
+      "Operators review and triage the queue, converting flags into service work orders.",
+    ],
+    data: "The fleet view merges the OCPP station snapshot, ANPR session matches, and the Open ModSim meter registers into one console.",
+    points: ["Live session & fleet-health monitoring", "Grid guardrails & demand-response scheduling", "Predictive maintenance queue"],
+    action: "charging",
+    actionLabel: "Open Charging operations",
+  };
+
+  const DISCOVERY_BRIEF = {
+    title: "Discovery API",
+    what: "A read API that lets driver apps, aggregators, and third-party maps ask \"what fast chargers are near me, do they have a free plug right now, and what does they cost?\" — without exposing raw internal telemetry.",
+    how: [
+      "A client queries with a location (and optional connector/operator filters); the API answers with stations in range.",
+      "Each station carries live availability, connector types, and pricing, resolved from the most recent OCPP snapshot.",
+      "The API only exposes the public contract — internal device IDs, register values, and DR signals stay behind the firewall.",
+      "Clients can subscribe to a webhook so they're notified the moment a station's status changes.",
+    ],
+    data: "Served by the backend /api/live and /api/chargers endpoints — the same data feeds the driver 'Find chargers' page.",
+    points: ["Real-time availability by site", "Connector type & pricing lookup", "Webhook on status change"],
+    action: "overview",
+    actionLabel: "See it on the Overview",
+  };
+
+  const THEFT_BRIEF = {
+    title: "Energy theft detection",
+    what: "A watchdog engine that compares live meter values against the expected load curve for every bay, so bypasses, meter tampering, and abnormal draws get flagged before they become revenue loss.",
+    how: [
+      "Open ModSim meter registers (grid import, per-EVSE draw, solar PV, battery SoC) arrive continuously and are time-aligned into the same frame as session data.",
+      "For each connector the engine builds an expected load corridor from its charging profile and occupancy.",
+      "A measured draw that diverges from the corridor beyond guardrails raises a high-confidence flag, autoholding the session.",
+      "Every flag is cross-checked against the ANPR plate match — a plate that was never at the bay strengthens the theft case.",
+      "Flags land in a manual review queue where a sign-off (or dismissal) is recorded for audits.",
+    ],
+    data: "Confidence scoring, guardrails configurable in Settings; flags surface on the Energy theft page.",
+    points: ["High-confidence flags auto-hold a session", "Cross-checked against ANPR plate matches", "Manual sign-off queue for reviewers"],
+    action: "theft",
+    actionLabel: "Open Energy theft desk",
+  };
+
+  const SERVICES_BRIEF = {
+    title: "End-to-end services",
+    what: "The physical-world arm of GRIDPULSE — site survey, charger installation, commissioning, and maintenance. It closes the loop between software that predicts problems and crews that fix them.",
+    how: [
+      "A site survey captures grid capacity, bay layout, and transformer head-room to size the install.",
+      "Chargers are installed and commissioned against the OCPP gateway; each one must pass the BootNotification handshake.",
+      "Preventive and predictive maintenance (from the CMS queue) generate work orders for technicians.",
+      "A 24/7 network operations center monitors the fleet and dispatches support when the CMS flags a site.",
+    ],
+    data: "Work orders and service history feed the predictive maintenance queue across owner dashboards.",
+  };
+
+  const MODBUS_BRIEF = {
+    title: "Open ModSim · MODBUS/TCP",
+    what: "An open-source substation simulator served over MODBUS/TCP that GRIDPULSE's meter master polls on port 1502. It stands in for the physical grid meters while letting you see real register traffic.",
+    how: [
+      "Open ModSim exposes registers for grid load, solar PV output, battery SoC, EVSE draw, and meter quality flags.",
+      "The GRIDPULSE meter master polls those registers on a fixed interval over MODBUS/TCP.",
+      "Register values are parsed and streamed into the Grid & energy and predictive dashboards in real time.",
+      "Anyone can write raw register values via /api/modbus/sim for engineering demos and disaster drills.",
+    ],
+    data: "MODBUS/TCP on port 1502 — register map is the classic Grid / PV / Battery / EVSE set.",
+    points: ["Polls grid load, solar PV, battery SoC & EVSE draw registers", "Register values stream into Grid & energy in real time", "Register writes (via /api/modbus/sim) for engineering demos"],
+    action: "grid",
+    actionLabel: "Open Grid & energy",
+  };
+
+  const VOLTTRON_BRIEF = {
+    title: "Eclipse VOLTTRON",
+    what: "PNNL's open edge platform that collects telemetry at a site and forwards it to the gateway. Important because edge agents keep logging locally even when the uplink to GRIDPULSE drops.",
+    how: [
+      "Agents running on the edge read site PV, grid, and EVSE metrics on their own schedule.",
+      "Telemetry is pushed to the gateway via /api/ingest/volttron as it comes in.",
+      "If the uplink fails, agents buffer and backfill — no data gap, just a delayed arrival.",
+      "The metrics land in Grid & energy and feed the predictive model's demand forecasts.",
+    ],
+    data: "Post-tag-data style ingest; the live source shows connection health for the demo instance.",
+    points: ["Site PV / grid / EVSE metrics pushed via /api/ingest/volttron", "Edge agents keep logging when the uplink drops", "Metrics feed Grid & energy and the predictive model"],
+    action: "grid",
+    actionLabel: "Open Grid & energy",
+  };
+
+  const JOSEV_BRIEF = {
+    title: "Josev · ISO 15118 Plug & Charge",
+    what: "EcoG's open ISO 15118 implementation brings Plug & Charge to the socket — the car authenticates cryptographically on plug-in, so no card or app tap is needed to authorise a session.",
+    how: [
+      "On plug-in, the EV and the charge point negotiate an ISO 15118 TLS session (CableCheck step).",
+      "The EV presents its charging contract; Josev runs the SessionMatched authorisation flow.",
+      "Authorised vehicles start charging automatically; the session event is bridged to GRIDPULSE via /api/ingest/josev.",
+      "For V2G-capable cars, setpoint power negotiation lets the site orchestrate bidirectional flow during demand response.",
+    ],
+    data: "Bidirectional SessionMatched events and CableCheck/handshake telemetry streamed from the Josev stack.",
+    points: ["SessionMatched Plug & Charge auth on plug-in", "V2G session negotiation at setpoint power", "CableCheck / TLS handshake events bridged via /api/ingest/josev"],
+    action: "gateway",
+    actionLabel: "See it in the live gateway",
+  };
+
+  const OPENADR_BRIEF = {
+    title: "OpenADR 2.0b Virtual Top Node",
+    what: "A native OpenADR 2.0b Virtual Top Node, so the network can run demand-response events against standard VEN clients instead of proprietary plumbing.",
+    how: [
+      "The VTN exposes the EiRegisterParty, EiEvent, and EiOpt XML endpoints any OpenADR client speaks.",
+      "The operator starts a DR event with a signal % and an incentive; the VTN publishes the EiEvent.",
+      "VENs respond with opt-in/opt-out; opt-outs are honoured and logged.",
+      "Live signal % flows into pricing and scheduling across the dashboards, and the charging plan respects the DR window.",
+    ],
+    data: "Events stream in real time from the running VTN; live signal % is read straight from the open-source server.",
+    points: ["EiRegisterParty / EiEvent / EiOpt XML endpoints", "DR events seeded with signal % and incentive", "VENs opt in/out live — opt-outs are honored"],
+    action: "gateway",
+    actionLabel: "See it in the live gateway",
+  };
+
+  const product = (title, icon, badge, tagline, points, brief, liveKey) => ({
+    title, icon, badge, tagline, points, liveStatus: liveKey ? liveStatus(liveKey) : null,
+    detail: brief, action: brief.action || null, actionLabel: brief.actionLabel || null,
+  });
+
+  const first = [
+    product("OCPP connectivity", Plug, "Core", "Open Charge Point Protocol links every charger on the network to GRIDPULSE over secure WebSockets.", OCPP_BRIEF.points, OCPP_BRIEF, "ocpp"),
+    product("ANPR vehicle recognition", Eye, "Beta", "Automatic Number Plate Recognition reads the plate as a vehicle pulls into the bay and matches it to its charging session.", ANPR_BRIEF.points, ANPR_BRIEF, "anpr"),
+    product("Charge Management System", LayoutDashboard, null, "The console fleet and site owners use to monitor, schedule, and troubleshoot every charger from one place.", CMS_BRIEF.points, CMS_BRIEF, null),
+  ];
+
+  const second = [
+    product("Discovery API", MapPin, null, "Lets driver apps and third-party maps query live charger location, availability, and pricing.", DISCOVERY_BRIEF.points, DISCOVERY_BRIEF, null),
+    product("Energy theft detection", ShieldOff, null, "Compares live meter values against the expected load curve to flag bypass or tamper attempts.", THEFT_BRIEF.points, THEFT_BRIEF, null),
+    product("End-to-end services", Wrench, null, "Site survey, installation, and ongoing maintenance for hardware deployed on the network.", SERVICES_BRIEF.points, SERVICES_BRIEF, null),
+  ];
+
+  const protocols = [
+    product("Open ModSim · MODBUS/TCP", Gauge, "Open source", "MODBUS/TCP substation simulator that GRIDPULSE's meter master polls on port 1502.", MODBUS_BRIEF.points, MODBUS_BRIEF, "modbus"),
+    product("Eclipse VOLTTRON", Building2, "Open source", "PNNL edge platform collecting site telemetry and forwarding it to the gateway.", VOLTTRON_BRIEF.points, VOLTTRON_BRIEF, "volttron"),
+    product("Josev · ISO 15118 Plug & Charge", Zap, "Open source", "EcoG's open ISO 15118 stack brings Plug & Charge to the charging socket.", JOSEV_BRIEF.points, JOSEV_BRIEF, "josev"),
+    product("OpenADR 2.0b Virtual Top Node", Radio, "Open source", "Native OpenADR 2.0b VTN the network uses to run demand-response events.", OPENADR_BRIEF.points, OPENADR_BRIEF, "openadr"),
+  ];
+
   return (
     <div className="g-page">
       <div className="g-page-head">
         <h2>Products</h2>
-        <p>The hardware, software, and integrations GRIDPULSE runs on across your network.</p>
+        <p>The hardware, software, and integrations GRIDPULSE runs on across your network. Click any card for a full brief.</p>
       </div>
 
       <div className="g-grid g-grid-3">
-        <ProductCard
-          icon={Plug}
-          title="OCPP connectivity"
-          badge="Core"
-          tagline="Open Charge Point Protocol links every charger on the network to GRIDPULSE over secure WebSockets."
-          points={["OCPP 1.6J & 2.0.1 support", "Remote start/stop and firmware push", "Smart charging profiles & load balancing"]}
-          liveStatus={liveStatus("ocpp")}
-          onConfigure={goToSettings}
-        />
-        <ProductCard
-          icon={Eye}
-          title="ANPR vehicle recognition"
-          badge="Beta"
-          tagline="Automatic Number Plate Recognition reads the plate as a vehicle pulls into the bay and matches it to its charging session."
-          points={["Tap-free session start & billing", "Unregistered/unmatched plate alerts", "Feeds the energy-theft cross-check engine"]}
-          liveStatus={liveStatus("anpr")}
-          onConfigure={goToSettings}
-        />
-        <ProductCard
-          icon={LayoutDashboard}
-          title="Charge Management System"
-          tagline="The console fleet and site owners use to monitor, schedule, and troubleshoot every charger from one place."
-          points={["Live session & fleet-health monitoring", "Grid guardrails & demand-response scheduling", "Predictive maintenance queue"]}
-        />
+        {first.map((p) => (
+          <ProductCard
+            key={p.title}
+            icon={p.icon}
+            title={p.title}
+            badge={p.badge}
+            tagline={p.tagline}
+            points={p.points}
+            liveStatus={p.liveStatus}
+            onConfigure={goToSettings}
+            onOpen={() => setOpenProduct(p.detail)}
+          />
+        ))}
       </div>
 
       <div className="g-grid g-grid-3" style={{ marginTop: 16 }}>
-        <ProductCard
-          icon={MapPin}
-          title="Discovery API"
-          tagline="Lets driver apps and third-party maps query live charger location, availability, and pricing."
-          points={["Real-time availability by site", "Connector type & pricing lookup", "Webhook on status change"]}
-        />
-        <ProductCard
-          icon={ShieldOff}
-          title="Energy theft detection"
-          tagline="Compares live meter values against the expected load curve to flag bypass or tamper attempts."
-          points={["High-confidence flags auto-hold a session", "Cross-checked against ANPR plate matches", "Manual sign-off queue for reviewers"]}
-        />
-        <ProductCard
-          icon={Wrench}
-          title="End-to-end services"
-          tagline="Site survey, installation, and ongoing maintenance for hardware deployed on the network."
-          points={["Charger install & commissioning", "Scheduled + predictive maintenance", "24/7 network operations support"]}
-        />
+        {second.map((p) => (
+          <ProductCard
+            key={p.title}
+            icon={p.icon}
+            title={p.title}
+            badge={p.badge}
+            tagline={p.tagline}
+            points={p.points}
+            liveStatus={p.liveStatus}
+            onOpen={() => setOpenProduct(p.detail)}
+          />
+        ))}
       </div>
 
       <div className="g-page-subhead" style={{ marginTop: 26 }}>
@@ -4500,43 +4888,22 @@ function OwnerProductsPage({ goToSettings }) {
       </div>
 
       <div className="g-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginTop: 16 }}>
-        <ProductCard
-          icon={Gauge}
-          title="Open ModSim · MODBUS/TCP"
-          badge="Open source"
-          tagline="MODBUS/TCP substation simulator that GRIDPULSE's meter master polls on port 1502."
-          points={["Polls grid load, solar PV, battery SoC & EVSE draw registers", "Register values stream into Grid & energy in real time", "Register writes (via /api/modbus/sim) for engineering demos"]}
-          liveStatus={liveStatus("modbus")}
-          onConfigure={goToSettings}
-        />
-        <ProductCard
-          icon={Building2}
-          title="Eclipse VOLTTRON"
-          badge="Open source"
-          tagline="PNNL edge platform collecting site telemetry and forwarding it to the gateway."
-          points={["Site PV / grid / EVSE metrics pushed via /api/ingest/volttron", "Edge agents keep logging when the uplink drops", "Metrics feed Grid & energy and the predictive model"]}
-          liveStatus={liveStatus("volttron")}
-          onConfigure={goToSettings}
-        />
-        <ProductCard
-          icon={Zap}
-          title="Josev · ISO 15118 Plug & Charge"
-          badge="Open source"
-          tagline="EcoG's open ISO 15118 stack brings Plug & Charge to the charging socket."
-          points={["SessionMatched Plug & Charge auth on plug-in", "V2G session negotiation at setpoint power", "CableCheck / TLS handshake events bridged via /api/ingest/josev"]}
-          liveStatus={liveStatus("josev")}
-          onConfigure={goToSettings}
-        />
-        <ProductCard
-          icon={Radio}
-          title="OpenADR 2.0b Virtual Top Node"
-          badge="Open source"
-          tagline="Native OpenADR 2.0b VTN the network uses to run demand-response events."
-          points={["EiRegisterParty / EiEvent / EiOpt XML endpoints", "DR events seeded with signal % and incentive", "VENs opt in/out live — opt-outs are honored"]}
-          liveStatus={liveStatus("openadr")}
-          onConfigure={goToSettings}
-        />
+        {protocols.map((p) => (
+          <ProductCard
+            key={p.title}
+            icon={p.icon}
+            title={p.title}
+            badge={p.badge}
+            tagline={p.tagline}
+            points={p.points}
+            liveStatus={p.liveStatus}
+            onConfigure={goToSettings}
+            onOpen={() => setOpenProduct(p.detail)}
+          />
+        ))}
       </div>
+
+      <ProductBriefModal product={openProduct} onClose={() => setOpenProduct(null)} onNavigate={onNavigate} />
     </div>
   );
 }
@@ -4982,7 +5349,7 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
         {page === "insights" && <OwnerPredictiveInsightsPage onNavigate={setPage} />}
         {page === "theft" && <OwnerTheftPage preferences={preferences} />}
         {page === "alerts" && <OwnerAlertsPage />}
-        {page === "products" && <OwnerProductsPage goToSettings={() => setPage("settings")} />}
+        {page === "products" && <OwnerProductsPage goToSettings={() => setPage("settings")} onNavigate={setPage} />}
         {page === "settings" && (
           <OwnerSettingsPage
             ocppEndpoint={ocppEndpoint} setOcppEndpoint={setOcppEndpoint}
@@ -5890,6 +6257,52 @@ export default function GridPulseApp() {
         .g-product-link{
           display:flex; align-items:center; gap:4px; font-size:12.5px; color:${C.cyan};
           background:none; border:none; margin-top:auto; padding-top:12px; align-self:flex-start;
+        }
+        .g-product-card-wrap{
+          cursor:pointer; transition:border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+        }
+        .g-product-card-wrap:hover .g-card, .g-product-card-wrap:focus-visible .g-card{
+          border-color:${C.cyan}66; box-shadow:0 0 0 1px ${C.cyan}33, 0 10px 28px rgba(0,0,0,.35);
+        }
+        .g-product-card-wrap:active .g-card{transform:translateY(1px);}
+        .g-product-card-wrap:focus-visible{outline:none;}
+        .g-product-card-wrap:focus-visible .g-card{outline:2px solid ${C.cyan}88; outline-offset:2px;}
+        .g-product-footer{
+          display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:auto;
+        }
+        .g-product-link-more{
+          color:${C.textDim}; margin-top:auto; padding-top:12px;
+          border:1px solid ${C.borderSoft}; border-radius:8px; padding:7px 10px; white-space:nowrap;
+        }
+        .g-product-link-more:hover{color:${C.cyan}; border-color:${C.cyan}66; background:${C.cyanSoft};}
+        .g-product-live-pill{
+          display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:20px;
+          background:rgba(255,255,255,.04); border:1px solid ${C.borderSoft}; white-space:nowrap;
+        }
+        .g-brief-hero{
+          border:1px solid ${C.cyan}44; background:${C.cyanSoft}; border-radius:12px; padding:12px 14px; margin-bottom:18px;
+        }
+        .g-brief-hero-label{
+          font-size:10px; font-family:var(--mono); letter-spacing:.08em; color:${C.cyan}; margin-bottom:4px;
+        }
+        .g-brief-hero p{font-size:13px; color:${C.text}; margin:0; line-height:1.55;}
+        .g-brief-sec{margin-bottom:18px;}
+        .g-brief-label{
+          font-size:11px; font-family:var(--mono); letter-spacing:.06em; color:${C.cyan};
+          margin-bottom:8px; display:flex; align-items:center; gap:6px;
+        }
+        .g-brief-label::before{content:""; width:6px; height:6px; border-radius:2px; background:${C.cyan}; display:inline-block;}
+        .g-brief-copy{font-size:13px; color:${C.textDim}; line-height:1.6; margin:0;}
+        .g-brief-data{
+          font-family:var(--mono); font-size:11.5px; color:${C.textDim};
+          background:rgba(255,255,255,.03); border:1px solid ${C.borderSoft}; border-radius:10px; padding:10px 12px;
+        }
+        .g-brief-steps{margin:0; padding-left:20px; display:flex; flex-direction:column; gap:8px;}
+        .g-brief-steps li{font-size:12.8px; color:${C.textDim}; line-height:1.55;}
+        .g-brief-steps li::marker{color:${C.cyan}; font-family:var(--mono); font-weight:600;}
+        .g-brief-actions{
+          display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:22px;
+          padding-top:16px; border-top:1px solid ${C.borderSoft};
         }
         .g-mono{font-family:var(--mono); font-size:12px; color:${C.cyan};}
 
