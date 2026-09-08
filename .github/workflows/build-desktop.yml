@@ -1,9 +1,11 @@
 name: build-desktop
 
-# Builds the downloadable GRIDPULSE Desktop installers.
-# - Windows (NSIS installer + zip) on windows-latest
-# - macOS (DMG + zip) for both Intel (x64) and Apple Silicon (arm64)
-# Trigger: push a tag like v1.0.0 (or run manually from the Actions tab).
+# Builds the downloadable GRIDPULSE Desktop installers and attaches them
+# to a GitHub Release.
+# - Windows (NSIS installer) on windows-latest
+# - macOS (DMG + zip) for Intel (x64) and Apple Silicon (arm64)
+# Trigger: push a tag like v1.0.0 (or run manually from the Actions tab;
+# manual runs from main attach to the v1.0.0 release).
 
 on:
   push:
@@ -18,6 +20,8 @@ jobs:
   windows:
     name: Windows (x64)
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -27,28 +31,26 @@ jobs:
           node-version: 20
 
       - name: Build web frontend
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
+        run: npm run build
 
-      - name: Build desktop installers
+      - name: Build Windows installer
         working-directory: desktop
-        env:
-          ELECTRON_BUILDER_CACHE: "~/.cache/electron"
         run: |
           npm install --no-audit --no-fund
           npm run dist:win
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
         with:
-          name: gridpulse-windows
-          path: desktop/release/*.exe
-          if-no-files-found: error
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || 'v1.0.0' }}
+          files: desktop/release/*.exe
+          fail_on_unmatched_files: false
 
   macos:
     name: macOS (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
@@ -65,38 +67,17 @@ jobs:
           node-version: 20
 
       - name: Build web frontend
-        run: |
-          npm install --no-audit --no-fund
-          npm run build
+        run: npm run build
 
-      - name: Build desktop installers
+      - name: Build macOS installer
         working-directory: desktop
         run: |
           npm install --no-audit --no-fund
           npx electron-builder --mac dmg zip
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: gridpulse-macos-${{ matrix.arch }}
-          path: desktop/release/*.dmg
-          if-no-files-found: error
-
-  release:
-    name: Attach to GitHub release
-    needs: [windows, macos]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Attach installers to release
+      - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.{exe,dmg}
-          generate_release_notes: true
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || 'v1.0.0' }}
+          files: desktop/release/*.{dmg,zip}
+          fail_on_unmatched_files: false

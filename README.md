@@ -79,8 +79,9 @@ npm run dist:mac       # build macOS DMG + zip
 npm run dist:win       # build Windows NSIS + zip
 ```
 
-Windows installers are also produced automatically by CI (`.github/workflows/
-build-desktop.yml`) when you push a `v*` tag — see the **Releases** tab.
+Windows and macOS (Intel + Apple Silicon) installers are also built
+automatically by CI (`.github/workflows/build-desktop.yml`) and attached to a
+GitHub **Release** when you push a `v*` tag.
 
 ## Deploying to Render (single service)
 
