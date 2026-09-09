@@ -1,6 +1,6 @@
 {
   "name": "gridpulse-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "GRIDPULSE Desktop — EV charging dashboards for driver and fleet owner. Ships its own runtime; nothing to install.",
   "main": "main.cjs",
   "license": "Apache-2.0",

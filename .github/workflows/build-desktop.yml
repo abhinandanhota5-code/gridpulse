@@ -3,7 +3,9 @@ name: build-desktop
 # Builds the downloadable GRIDPULSE Desktop installers and attaches them
 # to a GitHub Release.
 # - Windows (NSIS installer) on windows-latest
-# - macOS (DMG + zip) for Intel (x64) and Apple Silicon (arm64)
+# - macOS (DMG + zip) for Apple Silicon (arm64)
+# Note: Intel (x64) macOS installers are no longer buildable on GitHub-hosted
+# runners (macos-13 images were retired); macOS build targets arm64 only.
 # Trigger: push a tag like v1.0.0 (or run manually from the Actions tab;
 # manual runs from main attach to the v1.0.0 release).
 
@@ -56,8 +58,6 @@ jobs:
         include:
           - runner: macos-14
             arch: arm64
-          - runner: macos-13
-            arch: x64
     steps:
       - uses: actions/checkout@v4
 
