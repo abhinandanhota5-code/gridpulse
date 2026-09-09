@@ -10,6 +10,7 @@ const fs = require("fs");
 const { spawn } = require("child_process");
 const os = require("os");
 const net = require("net");
+const { autoUpdater } = require("electron-updater");
 
 /* ---- resolve bundled assets in dev vs packaged ---- */
 const isPackaged = !!app.isPackaged;
@@ -131,6 +132,89 @@ function showSetup() {
   mainWindow.loadFile(path.join(__dirname, "setup.html"));
 }
 
+/* ---------------------------------------------------------------- */
+/*  Auto-update via electron-updater (GitHub Releases)               */
+/*  Only runs in the packaged app — dev mode never checks.           */
+/* ---------------------------------------------------------------- */
+autoUpdater.autoDownload = true;
+let updateChecking = false;
+let updateEvent = null; // { state, version, percent, error }
+
+function setUpdateEvent(partial) {
+  updateEvent = { ...updateEvent, ...partial };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update:event", updateEvent);
+  }
+}
+
+function configureUpdater() {
+  // Point the updater at this project's GitHub Releases feed. This mirrors
+  // the build.publish config in desktop/package.json.
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.setFeedURL({
+    provider: "github",
+    owner: "abhinandanhota5-code",
+    repo: "gridpulse",
+    releaseType: "release",
+  });
+}
+
+function checkForUpdates(manual = false) {
+  if (!isPackaged) {
+    if (manual) { dialog.showMessageBox(mainWindow, { type: "info", message: "Auto-update is disabled in the dev build." }); }
+    return;
+  }
+  if (updateChecking) return;
+  updateChecking = true;
+  configureUpdater();
+  setUpdateEvent({ state: "checking" });
+  autoUpdater.checkForUpdatesAndNotify()
+    .catch((err) => {
+      updateChecking = false;
+      setUpdateEvent({ state: "error", error: String(err && err.message || err) });
+      if (manual) dialog.showErrorBox("Update check failed", String(err && err.message || err));
+    });
+}
+
+autoUpdater.on("checking-for-update", () => setUpdateEvent({ state: "checking" }));
+autoUpdater.on("update-available", (info) => {
+  setUpdateEvent({ state: "available", version: info.version });
+  console.log(`[desktop] update available: ${info.version}`);
+});
+autoUpdater.on("update-not-available", (info) => {
+  updateChecking = false;
+  setUpdateEvent({ state: "up-to-date", version: info.version });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    dialog.showMessageBox(mainWindow, {
+      type: "info",
+      title: "GRIDPULSE",
+      message: `You’re on the latest version (${app.getVersion()}).`,
+    }).catch(() => { /* ignore */ });
+  }
+});
+autoUpdater.on("download-progress", (p) => setUpdateEvent({ state: "downloading", percent: Math.round(p.percent) }));
+autoUpdater.on("update-downloaded", (info) => {
+  updateChecking = false;
+  setUpdateEvent({ state: "downloaded", version: info.version });
+  mainWindow && !mainWindow.isDestroyed() &&
+    dialog.showMessageBox(mainWindow, {
+      type: "question",
+      title: "GRIDPULSE update ready",
+      message: `Version ${info.version} is ready to install.`,
+      detail: "Restart GRIDPULSE now to apply the update?",
+      buttons: ["Restart now", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    }).catch(() => { /* ignore */ });
+});
+autoUpdater.on("error", (err) => {
+  updateChecking = false;
+  setUpdateEvent({ state: "error", error: String(err && err.message || err) });
+  console.error("[desktop] auto-update error:", err);
+});
+
 function buildMenu() {
   const isMac = process.platform === "darwin";
   const template = [
@@ -140,6 +224,7 @@ function buildMenu() {
       submenu: [
         { label: "Open dashboard", click: openDashboard },
         { label: "Setup guide", click: showSetup },
+        { label: "Check for updates…", click: () => checkForUpdates(true) },
         { type: "separator" },
         { label: "Open in browser", click: () => shell.openExternal(`http://127.0.0.1:${port}`) },
         { label: "Open app folder", click: () => shell.openPath(path.dirname(app.getAppPath())) },
@@ -237,8 +322,15 @@ ipcMain.handle("open-setup", () => showSetup());
 ipcMain.handle("open-external", (_e, url) => shell.openExternal(url));
 ipcMain.handle("open-app-folder", () => shell.openPath(path.dirname(app.getAppPath())));
 ipcMain.handle("get-port", () => port);
+ipcMain.handle("check-for-updates", () => checkForUpdates(true));
+ipcMain.handle("get-update-status", () => updateEvent);
 
 app.whenReady().then(async () => { buildMenu(); await createWindows(); });
+
+// Kick off a background auto-update check once the backend is healthy.
+setTimeout(() => {
+  try { checkForUpdates(false); } catch (err) { console.error("[desktop] auto-update init failed:", err); }
+}, 8000);
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

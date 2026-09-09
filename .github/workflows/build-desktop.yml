@@ -1,13 +1,16 @@
 name: build-desktop
 
-# Builds the downloadable GRIDPULSE Desktop installers and attaches them
-# to a GitHub Release.
+# Builds the downloadable GRIDPULSE Desktop installers and publishes them to
+# a GitHub Release via electron-builder's GitHub publisher. electron-builder
+# uploads the installers plus the latest*.yml metadata and *.blockmap files
+# that the in-app auto-updater (electron-updater) needs to ship updates
+# without requiring users to re-download.
 # - Windows (NSIS installer) on windows-latest
 # - macOS (DMG + zip) for Apple Silicon (arm64)
-# Note: Intel (x64) macOS installers are no longer buildable on GitHub-hosted
-# runners (macos-13 images were retired); macOS build targets arm64 only.
-# Trigger: push a tag like v1.0.0 (or run manually from the Actions tab;
-# manual runs from main attach to the v1.0.0 release).
+# Note: macOS auto-update requires a code-signed + notarized build; this
+# workflow builds unsigned (CSC_IDENTITY_AUTO_DISCOVERY=false), which keeps
+# manual installs working but disables macOS background auto-update.
+# Trigger: push a tag like v1.0.0 (or run manually from the Actions tab).
 
 on:
   push:
@@ -35,18 +38,13 @@ jobs:
       - name: Build web frontend
         run: npm run build
 
-      - name: Build Windows installer
+      - name: Build & publish Windows installer
         working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm install --no-audit --no-fund
-          npm run dist:win
-
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event_name == 'push' && github.ref_name || 'v1.0.0' }}
-          files: desktop/release/*.exe
-          fail_on_unmatched_files: false
+          npx electron-builder --win nsis zip --publish always
 
   macos:
     name: macOS (${{ matrix.arch }})
@@ -69,15 +67,10 @@ jobs:
       - name: Build web frontend
         run: npm run build
 
-      - name: Build macOS installer
+      - name: Build & publish macOS installer
         working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npm install --no-audit --no-fund
-          npx electron-builder --mac dmg zip
-
-      - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event_name == 'push' && github.ref_name || 'v1.0.0' }}
-          files: desktop/release/*.{dmg,zip}
-          fail_on_unmatched_files: false
+          npx electron-builder --mac dmg zip --publish always

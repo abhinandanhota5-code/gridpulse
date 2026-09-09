@@ -1,16 +1,72 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
+    <!-- Base backdrop: deep space navy -->
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0e1722"/>
-      <stop offset="1" stop-color="#12222f"/>
+      <stop offset="0" stop-color="#0a141f"/>
+      <stop offset="0.55" stop-color="#081017"/>
+      <stop offset="1" stop-color="#05090d"/>
     </linearGradient>
-    <linearGradient id="bolt" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#53e3bd"/>
-      <stop offset="1" stop-color="#22b389"/>
+
+    <!-- Electric bolt: white-hot core to vivid cyan -->
+    <linearGradient id="bolt" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#eafcff"/>
+      <stop offset="0.45" stop-color="#7ff0ff"/>
+      <stop offset="1" stop-color="#2ec9ff"/>
     </linearGradient>
+
+    <!-- Outer ring: cyan to green -->
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4fe3ff"/>
+      <stop offset="1" stop-color="#33e7a0"/>
+    </linearGradient>
+
+    <!-- Pulse waveform accent -->
+    <linearGradient id="pulse" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#4fe3ff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#7ff0ff"/>
+      <stop offset="1" stop-color="#4fe3ff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Soft halo behind the bolt -->
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.55">
+      <stop offset="0" stop-color="#4fe3ff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#4fe3ff" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="blur" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
   </defs>
-  <rect width="1024" height="1024" rx="220" fill="url(#bg)" stroke="#1e2a38" stroke-width="14"/>
-  <circle cx="512" cy="470" r="300" rx="150" fill="none" stroke="#1e2a38" stroke-width="26"/>
-  <path d="M575 190 L288 560 L452 560 L430 834 L730 450 L548 450 Z" fill="url(#bolt)"/>
+
+  <!-- Rounded-square plate -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+
+  <!-- Faint grid lines (the "grid") -->
+  <g stroke="#2a3f52" stroke-width="6" opacity="0.28">
+    <line x1="0" y1="300" x2="1024" y2="300"/>
+    <line x1="0" y1="520" x2="1024" y2="520"/>
+    <line x1="0" y1="740" x2="1024" y2="740"/>
+    <line x1="300" y1="0" x2="300" y2="1024"/>
+    <line x1="520" y1="0" x2="520" y2="1024"/>
+    <line x1="740" y1="0" x2="740" y2="1024"/>
+  </g>
+
+  <!-- Ambient glow -->
+  <circle cx="512" cy="450" r="330" fill="url(#glow)"/>
+
+  <!-- Outer gradient ring -->
+  <circle cx="512" cy="450" r="316" rx="150" fill="none" stroke="url(#ring)" stroke-width="26" opacity="0.95"/>
+  <circle cx="512" cy="450" r="330" rx="150" fill="none" stroke="#4fe3ff" stroke-width="4" opacity="0.25" filter="url(#blur)"/>
+
+  <!-- Pulse waveform along the base (the "pulse") -->
+  <g stroke="url(#pulse)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.9">
+    <path d="M232 742 L348 742 L404 618 L460 866 L516 700 L572 836 L628 618 L684 742 L800 742"/>
+  </g>
+
+  <!-- Lightning bolt (the charge) with halo -->
+  <path d="M598 150 L286 566 L468 566 L436 826 L758 388 L552 388 Z"
+        fill="url(#bolt)" stroke="#0a141f" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M598 150 L286 566 L468 566 L436 826 L758 388 L552 388 Z"
+        fill="#4fe3ff" opacity="0.5" filter="url(#blur)" transform="translate(0,26)"/>
 </svg>

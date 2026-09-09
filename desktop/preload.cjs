@@ -8,4 +8,11 @@ contextBridge.exposeInMainWorld("gridpulse", {
   openExternal: (url) => ipcRenderer.invoke("open-external", url),
   openAppFolder: () => ipcRenderer.invoke("open-app-folder"),
   getPort: () => ipcRenderer.invoke("get-port"),
+  checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
+  getUpdateStatus: () => ipcRenderer.invoke("get-update-status"),
+  onUpdateEvent: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on("update:event", listener);
+    return () => ipcRenderer.removeListener("update:event", listener);
+  },
 });
