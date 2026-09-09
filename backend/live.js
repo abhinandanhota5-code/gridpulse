@@ -168,7 +168,7 @@ class LiveHub extends EventEmitter {
       plateConf: "high",
       charger: `${station.identity} · connector ${id}`,
       soc: conn.soC ? `${Math.round(conn.soC)}%` : "…",
-      power: `${conn.powerKw.toFixed(1)} kW`,
+      power: `${(conn.powerKw || 0).toFixed(1)} kW`,
       cost: "$…",
       source: "ocpp",
     });
@@ -230,6 +230,7 @@ class LiveHub extends EventEmitter {
       }
       if (touched) conn.updatedAt = ts || new Date().toISOString();
     }
+    if (!station.meterHistory) station.meterHistory = [];
     if (touched && station.meterHistory.length < MAX_METER_POINTS) {
       station.meterHistory.push({ t: Date.now(), powerKw: conn.powerKw, soC: conn.soC, kwh: conn.meterKwh });
     }
@@ -368,7 +369,7 @@ class LiveHub extends EventEmitter {
           connectorId: id, status: c.status, powerKw: d(c.powerKw), soC: d(c.soC),
           tempC: d(c.tempC), meterKwh: d(c.meterKwh),
         })),
-        meterHistory: s.meterHistory.map((h) => ({ t: h.t, powerKw: d(h.powerKw), soC: d(h.soC) })),
+        meterHistory: (s.meterHistory || []).map((h) => ({ t: h.t, powerKw: d(h.powerKw), soC: d(h.soC) })),
       })),
       modbus: {
         connected: this.modbus.connected,

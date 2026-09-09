@@ -1737,7 +1737,7 @@ function DriverGaragePage({ preferences, vehicleProfile }) {
       live: true,
     }));
     const seen = new Set();
-    return [...liveRows, ...fastagTransactions].filter((r) => {
+    return [...liveRows, ...(fastagTransactions || [])].filter((r) => {
       if (!r.id) return true;
       if (seen.has(r.id)) return false;
       seen.add(r.id);
@@ -2035,7 +2035,7 @@ function DriverOverviewPage({ name, preferences, vehicleProfile }) {
     gridScore: <Kpi key="gridScore" label="Grid-friendly score" value={m.gridFriendlyScore.value} sub={m.gridFriendlyScore.sub} icon={Target} />,
     distance: <Kpi key="distance" label="Distance this week" value={m.weeklyDistanceKm.value} sub={m.weeklyDistanceKm.sub} icon={Fuel} trend={m.weeklyDistanceKm.trend} />,
     regen: <Kpi key="regen" label="Regen recovered" value={m.regenKwh.value} sub={m.regenKwh.sub} icon={BatteryCharging} accent={C.green} />,
-    weather: <Kpi key="weather" label="Today's weather" value={`${currentWeather.tempC}°C`} sub={`${currentWeather.condition} · humidity ${currentWeather.humidity}%`} icon={CloudSun} accent={C.amber} />,
+    weather: <Kpi key="weather" label="Today's weather" value={`${currentWeather?.tempC ?? "—"}°C`} sub={`${currentWeather?.condition || "—"} · humidity ${currentWeather?.humidity ?? "—"}%`} icon={CloudSun} accent={C.amber} />,
     rangeImpact: <Kpi key="rangeImpact" label="Range impact" value="-4%" sub="Cabin cooling in this heat" icon={Thermometer} accent={C.amber} trend="down" />,
     idleRisk: <Kpi key="idleRisk" label="Idle-fee risk" value={m.idleFeeRisk.value} sub={m.idleFeeRisk.sub} icon={Clock} accent={C.green} />,
     nextBill: <Kpi key="nextBill" label="Next bill estimate" value={formatMoneyText(m.nextBillEstimate.value, preferences)} sub={formatMoneyText(m.nextBillEstimate.sub, preferences)} icon={CreditCard} />,
@@ -2215,7 +2215,7 @@ function DriverHistoryPage({ preferences }) {
       live: true,
     }));
     const seen = new Set();
-    return [...liveRows, ...fastagTransactions].filter((r) => {
+    return [...liveRows, ...(fastagTransactions || [])].filter((r) => {
       if (!r.id) return true;
       if (seen.has(r.id)) return false;
       seen.add(r.id);
@@ -2487,8 +2487,8 @@ function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalCharger
     if (!map || fittedRef.current) return;
     fittedRef.current = true;
     if (userFix) map.setView([userFix.lat, userFix.lng], 13);
-    else if (focusBounds && focusBounds.length) map.fitBounds(L.latLngBounds(focusBounds.map((c) => [c.lat, c.lng])).pad(0.2), { maxZoom: 9 });
-    else if (chargers.length) map.fitBounds(L.latLngBounds(chargers.map((c) => [c.lat, c.lng])).pad(0.22), { maxZoom: 14 });
+    else if (focusBounds && focusBounds.length) map.fitBounds(L.latLngBounds(focusBounds.filter((c) => c.lat != null && c.lng != null).map((c) => [c.lat, c.lng])).pad(0.2), { maxZoom: 9 });
+    else if (chargers.length) map.fitBounds(L.latLngBounds(chargers.filter((c) => c.lat != null && c.lng != null).map((c) => [c.lat, c.lng])).pad(0.22), { maxZoom: 14 });
   }, [userFix, chargers]);
 
   // Charger pins (rebuilt when conditions/distances update).
@@ -2803,7 +2803,7 @@ function DriverChargersPage({ preferences }) {
 
   const [copied, setCopied] = useState(null);
   const copyCoords = (c) => {
-    const text = `${c.lat.toFixed(6)}, ${c.lng.toFixed(6)}`;
+    const text = `${(c.lat ?? 0).toFixed(6)}, ${(c.lng ?? 0).toFixed(6)}`;
     navigator.clipboard?.writeText(text)
       .then(() => {
         setCopied(c.name);
@@ -3331,7 +3331,9 @@ function DriverChargePlannerPage({ preferences }) {
   const tempC = weatherAt?.current?.temperature_2m ?? null;
   const tempImpact = rangeTempImpact(tempC);
 
-  const profile = chargeProfiles.find((p) => p.key === profileKey);
+  const chargeProfilesSafe = chargeProfiles || [];
+  const profile = chargeProfilesSafe.find((p) => p.key === profileKey)
+    || { key: "balanced", minPowerKw: 3, maxPowerKw: 22, rate: 0.16 };
 
   const plan = useMemo(() => {
     const now = new Date();
@@ -3362,7 +3364,7 @@ function DriverChargePlannerPage({ preferences }) {
       ? Math.round((profile.rate || 0.16) * (fxRate || 83))
       : profile.rate;
     const cost = energyNeeded * ratePerKwh;
-    const gentleFeasible = requiredSteadyPower <= chargeProfiles[2].maxPowerKw;
+    const gentleFeasible = requiredSteadyPower <= (chargeProfilesSafe[2]?.maxPowerKw ?? 0);
 
     // Off-peak guidance: TOU tariffs are cheapest 10 PM - 6 AM (~25% below standard).
     const offPeakStart = 22;
@@ -3470,7 +3472,7 @@ function DriverChargePlannerPage({ preferences }) {
       <div className="g-grid g-grid-2" style={{ marginTop: 16 }}>
         <Card title="Charging style" icon={Gauge}>
           <div className="g-role-toggle" style={{ gridTemplateColumns: "1fr", gap: 8, marginBottom: 0 }}>
-            {chargeProfiles.map((p) => (
+            {chargeProfilesSafe.map((p) => (
               <button
                 key={p.key}
                 type="button"
@@ -4150,9 +4152,6 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
   const [page, setPage] = useState("overview");
   const [searchQuery, setSearchQuery] = useState("");
 
-  if (loading) return <DashboardLoadState />;
-  if (error) return <DashboardLoadState error={error} />;
-
   const navItems = [
     { key: "overview", label: "Overview", icon: LayoutDashboard },
     { key: "garage", label: "My car", icon: Car },
@@ -4229,6 +4228,9 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
     }
     setSearchQuery("");
   };
+
+  if (loading) return <DashboardLoadState />;
+  if (error) return <DashboardLoadState error={error} />;
 
   return (
     <div className="g-shell">
@@ -4511,8 +4513,8 @@ function OwnerOverviewPage({ preferences }) {
       <div className="g-grid g-grid-4" style={{ marginTop: 16 }}>
         <Kpi
           label="Today's weather"
-          value={`${currentWeather.tempC}°C`}
-          sub={`${currentWeather.condition} · feels ${currentWeather.feelsLikeC}°C`}
+          value={`${currentWeather?.tempC ?? "—"}°C`}
+          sub={`${currentWeather?.condition || "—"} · feels ${currentWeather?.feelsLikeC ?? "—"}°C`}
           icon={CloudSun} accent={C.amber}
         />
         <Kpi label="Renewable share" value={m.renewableShare.value} sub={m.renewableShare.sub} icon={Leaf} accent={C.green} />
@@ -5633,7 +5635,7 @@ function ProductCard({ icon: Icon, title, tagline, points, badge, onConfigure, l
           )}
           <p className="g-kpi-sub" style={{ marginBottom: 14, fontSize: 12.5, lineHeight: 1.55 }}>{tagline}</p>
           <div className="g-list">
-            {points.map((p, i) => (
+            {(points || []).map((p, i) => (
               <div className="g-list-row" key={i} style={{ padding: "8px 0" }}>
                 <div className="g-list-main">
                   <CheckCircle2 size={13} style={{ color: C.green, flexShrink: 0 }} />
@@ -5846,6 +5848,7 @@ function OwnerProductsPage({ goToSettings, onNavigate }) {
       "A 24/7 network operations center monitors the fleet and dispatches support when the CMS flags a site.",
     ],
     data: "Work orders and service history feed the predictive maintenance queue across owner dashboards.",
+    points: ["Site survey & grid sizing", "Installation & OCPP commissioning", "Predictive maintenance work orders"],
   };
 
   const MODBUS_BRIEF = {
@@ -6246,9 +6249,6 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
   const [anprStatus, setAnprStatus] = useState("idle"); // idle | testing | connected | failed
   const [camerasOnline, setCamerasOnline] = useState(0);
 
-  if (loading) return <DashboardLoadState />;
-  if (error) return <DashboardLoadState error={error} />;
-
   function testOcppConnection() {
     if (!ocppEndpoint.trim()) {
       setOcppStatus("failed");
@@ -6392,6 +6392,9 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
     else if (result.key) setPage(result.key);
     setSearchQuery("");
   };
+
+  if (loading) return <DashboardLoadState />;
+  if (error) return <DashboardLoadState error={error} />;
 
   return (
     <div className="g-shell">

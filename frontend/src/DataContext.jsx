@@ -129,12 +129,24 @@ export function useAppData() {
 // Convenience hooks so each page component only pulls what it needs.
 export function useDriverData() {
   const { driver, loading, error } = useAppData();
-  return { ...(driver || {}), loading, error };
+  return {
+    nearbyChargers: [], fastagTransactions: [], driverUpcoming: [], driverWeeklyExtras: [],
+    driverChargeHistory: [], driverCostHistory: [], chargeProfiles: [],
+    ...(driver || {}),
+    loading,
+    error,
+  };
 }
 
 export function useOwnerData() {
   const { owner, loading, error } = useAppData();
-  return { ...(owner || {}), loading, error };
+  return {
+    fleetChargers: [], theftFlags: [], anomalies: [], activeSessions: [],
+    maintenanceQueue: [], batteryWatchlist: [], demandResponseEvents: [],
+    ...(owner || {}),
+    loading,
+    error,
+  };
 }
 
 export function useLiveData() {
