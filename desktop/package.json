@@ -45,6 +45,11 @@
     "mac": {
       "category": "public.app-category.utilities",
       "icon": "assets/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist",
+      "notarize": true,
       "target": [
         "dmg",
         "zip"
