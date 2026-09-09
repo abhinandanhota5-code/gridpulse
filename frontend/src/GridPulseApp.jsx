@@ -12,7 +12,8 @@ import {
   CloudRain, CloudSun, Droplets, Thermometer, Eye, CreditCard, Wallet, Users, Target, Fuel,
   Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu,
   LocateFixed, RefreshCw, Navigation, FileText, Upload, ShieldCheck, BadgeCheck, CalendarDays, ArrowUpDown,
-  Sun, Moon, Cloud, CloudFog, CloudSnow, CloudLightning, Wind, Compass
+  Sun, Moon, Cloud, CloudFog, CloudSnow, CloudLightning, Wind, Compass,
+  Rocket, MessageCircle, Send, Sparkles, Bot, CircleDot, GitBranch
 } from "lucide-react";
 
 import { C, STATUS_COLOR, CONFIDENCE_COLOR } from "./theme.js";
@@ -4146,6 +4147,335 @@ function DriverAnalyticsPage({ onNavigate, preferences }) {
   );
 }
 
+/* ---------------------------------------------------------------- */
+/*  Roadmap — planned updates shared by both dashboards              */
+/* ---------------------------------------------------------------- */
+const ROADMAP_PHASES = [
+  {
+    key: "q4-2026",
+    label: "Quarter 4 · 2026",
+    status: "In progress",
+    accent: C.cyan,
+    items: [
+      { title: "Multi-currency billing & invoicing", detail: "Auto-generate itemized invoices for fleet owners with GST-ready line items and CSV/PDF export." },
+      { title: "Scheduled charging presets", detail: "Let drivers save per-location charging presets (cost-first, green-first, fast-first) and apply them on the go." },
+      { title: "Live charger reliability scoring", detail: "Surface station-level uptime and historical reliability so drivers can pick the most trustworthy plug." },
+      { title: "Push & email alerting", detail: "Get notified the moment a charger, site, or fleet vehicle crosses a threshold — no need to keep the dashboard open." },
+    ],
+  },
+  {
+    key: "q1-2027",
+    label: "Quarter 1 · 2027",
+    status: "Planned",
+    accent: C.green,
+    items: [
+      { title: "Route-aware battery preconditioning", detail: "Pre-heat or pre-cool the battery ahead of planned fast-charge stops based on the live route and weather." },
+      { title: "Fleet demand-response automation", detail: "Automatically shed or shift fleet load during OpenADR events and earn grid incentives with zero manual steps." },
+      { title: "Theft analytics with geofencing", detail: "Correlate ANPR reads with charging sessions and raise geofence-based flags when a vehicle leaves expected zones." },
+      { title: "OCPP 2.0.1 smart charging profiles", detail: "Push load-limiting and time-based Charging Profiles to chargers directly from the gateway." },
+    ],
+  },
+  {
+    key: "later",
+    label: "Later · 2027",
+    status: "Exploring",
+    accent: C.amber,
+    items: [
+      { title: "HVDC + NACS connector support", detail: "First-class support for high-power DC and NACS connectors in station mapping and planning." },
+      { title: "Marketplace for charger operators", detail: "Let third-party operators list stations and manage their own tariff/pricing from the platform." },
+      { title: "ISO 15118 Plug & Charge rollout", detail: "Full certificate-based Plug & Charge (ISO 15118-20) for seamless, no-app authentication." },
+      { title: "Community trip & route guides", detail: "Curated long-distance EV routes with verified charger recommendations from the fleet community." },
+    ],
+  },
+];
+
+function RoadmapPage() {
+  const [expanded, setExpanded] = useState(() => ROADMAP_PHASES[0].key);
+  const phases = ROADMAP_PHASES;
+
+  return (
+    <div className="g-page">
+      <div className="g-page-head g-page-display">
+        <div className="g-page-head-main">
+          <div className="g-eyebrow">Roadmap</div>
+          <h2>What’s next on the grid</h2>
+          <p>Planned updates and capabilities GRIDPULSE is working toward, grouped by delivery phase.</p>
+        </div>
+      </div>
+
+      <div className="g-roadmap-summary">
+        <div className="g-roadmap-summary-item">
+          <span className="g-roadmap-summary-v g-mono">{ROADMAP_PHASES.length}</span>
+          <span className="g-roadmap-summary-l">Delivery phases</span>
+        </div>
+        <div className="g-roadmap-summary-item">
+          <span className="g-roadmap-summary-v g-mono">{ROADMAP_PHASES.reduce((n, p) => n + p.items.length, 0)}</span>
+          <span className="g-roadmap-summary-l">Upcoming features</span>
+        </div>
+        <div className="g-roadmap-summary-item">
+          <span className="g-roadmap-summary-v g-mono">{ROADMAP_PHASES.filter((p) => p.status === "In progress").length}</span>
+          <span className="g-roadmap-summary-l">In progress now</span>
+        </div>
+      </div>
+
+      <div className="g-roadmap">
+        {phases.map((phase) => {
+          const open = expanded === phase.key;
+          return (
+            <div className={`g-roadmap-phase ${open ? "g-roadmap-phase-open" : ""}`} key={phase.key}>
+              <button
+                type="button"
+                className="g-roadmap-phase-head"
+                onClick={() => setExpanded(open ? null : phase.key)}
+              >
+                <span className="g-roadmap-phase-icon" style={{ color: phase.accent, borderColor: `${phase.accent}44`, background: phase.accent + "14" }}>
+                  {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </span>
+                <span className="g-roadmap-phase-label">{phase.label}</span>
+                <Badge status={phase.status === "In progress" ? "healthy" : phase.status === "Planned" ? "warning" : "resting"}>{phase.status}</Badge>
+                <span className="g-roadmap-phase-count g-mono">{phase.items.length}</span>
+              </button>
+              {open && (
+                <div className="g-roadmap-phase-body">
+                  {phase.items.map((item, i) => (
+                    <div className="g-roadmap-item" key={i}>
+                      <span className="g-roadmap-item-dot" style={{ background: phase.accent }} />
+                      <div className="g-roadmap-item-main">
+                        <div className="g-roadmap-item-title">{item.title}</div>
+                        <div className="g-roadmap-item-detail">{item.detail}</div>
+                      </div>
+                      <span className="g-roadmap-item-tag g-mono" style={{ color: phase.accent }}>SHIP</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="g-roadmap-note">
+        <Sparkles size={15} style={{ color: C.cyan, flexShrink: 0, marginTop: 2 }} />
+        <span>Priorities can shift based on driver feedback, partner demand, and grid/regulatory changes. Have an idea? Ask the assistant the next time you are logged in.</span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/*  Chatbot assistant — floating in-app assistant                     */
+/* ---------------------------------------------------------------- */
+const CHAT_KNOWLEDGE = {
+  driver: {
+    "overview": "The Overview shows your key live stats — monthly energy, spend, estimated range and CO2 avoided — plus your vehicle at a glance.",
+    "garage": "My car holds your vehicle profile: market value, battery, insurance and PUC renewals, and digital documents.",
+    "planner": "The Charge planner picks the cheapest, greenest, or fastest charging window using live grid, solar and demand-response signals.",
+    "history": "Charging history lists every past session with cost, energy, duration and location.",
+    "battery": "Battery health tracks capacity retention, charge cycles and projects future degradation.",
+    "chargers": "Find chargers shows nearby stations on a live map with price, availability and reliability.",
+    "analytics": "Predictive insights forecast future range, cost and battery behaviour based on your patterns.",
+    "roadmap": "The Roadmap lists all planned GRIDPULSE updates grouped by delivery phase.",
+    "settings": "Settings lets you change currency, region and other preferences.",
+  },
+  owner: {
+    "overview": "The Owner Overview shows fleet, grid and energy health at a glance plus live protocol telemetry.",
+    "gateway": "Live gateway shows real-time OCPP, MODBUS, OpenADR, ISO 15118 and ANPR feeds.",
+    "charging": "Charging operations monitors every station, connector and session across your fleet.",
+    "grid": "Grid & energy tracks load, solar and demand across sites.",
+    "battery": "Battery insights summarizes battery health across the fleet.",
+    "insights": "Predictive insights forecast load, cost and risk with scenario models.",
+    "theft": "Energy theft correlates ANPR reads with sessions to flag anomalies.",
+    "alerts": "Alerts collects active anomalies and charging issues across the network.",
+    "products": "Products lists the GRIDPULSE product suite and integrations.",
+    "roadmap": "The Roadmap lists all planned GRIDPULSE updates grouped by delivery phase.",
+    "settings": "Settings manages OCPP/ANPR connections and platform preferences.",
+  },
+};
+
+const CHAT_QNA = [
+  {
+    keywords: ["demo", "account", "login", "password", "sign in", "signin"],
+    answer: (role) => role === "driver"
+      ? "Driver demo: account TN84DR5021, password demo123. Owner demo: account GRIDPULSE, password owner123."
+      : "Owner demo: account GRIDPULSE, password owner123. Driver demo (for contrast): TN84DR5021 / demo123.",
+  },
+  {
+    keywords: ["ocpp", "protocol", "charger", "station", "csms", "websocket"],
+    answer: () => "GRIDPULSE speaks raw OCPP 1.6J / 2.0.1 over WebSocket. Point a charger at ws://<host>/ocpp/{stationId}. The Live gateway page shows the feed.",
+  },
+  {
+    keywords: ["modbus", "meter", "energy meter", "register"],
+    answer: () => "MODBUS energy meters are read through the MODBUS master (default :1502). Live registers stream to the Gateway and Grid pages.",
+  },
+  {
+    keywords: ["openadr", "demand response", "dr event", "vtn", "ven", "incentive"],
+    answer: () => "OpenADR 2.0b is supported — the gateway acts as a VTN and exposes POST /openadr/ei/register, /event and /opt. Demand-response incentives show on the smart charge planner.",
+  },
+  {
+    keywords: ["15118", "iso", "josev", "plug and charge", "v2g"],
+    answer: () => "ISO 15118 via Josev is bridged through POST /api/ingest/josev for Plug & Charge and V2G event data. Plug & Charge certificates are on the roadmap.",
+  },
+  {
+    keywords: ["volttron", "ingest", "building", "site metric"],
+    answer: () => "VOLTTRON site metrics are bridged via POST /api/ingest/volttron (optional x-ingest-token auth) and shown across owner views.",
+  },
+  {
+    keywords: ["anpr", "plate", "theft", "camera", "license"],
+    answer: () => "ANPR reads license plates to detect charging theft. Events POST to /api/v1/plate-events and are correlated with sessions on the Energy theft page.",
+  },
+  {
+    keywords: ["weather", "gps", "plan", "trip", "range"],
+    answer: () => "The trip planner combines GPS, live weather (Open-Meteo) and your range to recommend charge stops. Cold or hot weather adjusts estimated range automatically.",
+  },
+  {
+    keywords: ["roadmap", "planned", "update", "upcoming", "future", "new feature"],
+    answer: () => "Check the Roadmap page — it lists all planned updates grouped by delivery phase (Q4 2026, Q1 2027 and later).",
+  },
+  {
+    keywords: ["cost", "price", "tariff", "bill", "money", "inr", "usd"],
+    answer: () => "GRIDPULSE converts tariffs between USD and INR live and highlights the most cost-effective charging windows on the smart charge planner.",
+  },
+  {
+    keywords: ["solar", "green", "carbon", "co2", "emission", "renewable"],
+    answer: () => "The smart charge planner can prioritise solar/green windows and shows CO2 avoided over your lifetime on the Overview.",
+  },
+  {
+    keywords: ["help", "shortcut", "keyboard", "navigation"],
+    answer: () => "Press Ctrl/Cmd + / for the help modal with keyboard shortcuts, or Ctrl/Cmd + K to focus quick search.",
+  },
+  {
+    keywords: ["hi", "hello", "hey", "start", "help me"],
+    answer: (role) => role === "driver"
+      ? "Hi! I can answer questions about GRIDPULSE for drivers — nav, charging, planning, demo accounts and more. Try asking about the charge planner or demo logins."
+      : "Hi! I can answer questions about GRIDPULSE for fleet owners — gateway protocols, alerts, theft and the roadmap. Try asking about OCPP or demo logins.",
+  },
+  {
+    keywords: ["thank", "thanks", "cool", "great", "awesome", "nice"],
+    answer: () => "Happy to help! Anything else you'd like to know about GRIDPULSE?",
+  },
+];
+
+function fallbackChatAnswer(text, role) {
+  const lower = text.toLowerCase();
+  if (role === "driver" && lower.includes("range")) return "Estimated range uses your current SoC, battery health and weather. Head to Overview for the live figure.";
+  if (role === "owner" && lower.includes("grid")) return "The Grid & energy page tracks live load, solar and demand across your sites.";
+  if (lower.includes("password")) return "Owner: GRIDPULSE / owner123 · Driver: TN84DR5021 / demo123.";
+  return "I’m a rule-based assistant, so I cover the core GRIDPULSE topics (navigation, protocol feeds, demo accounts and the roadmap). Try rephrasing, or take a look at the Roadmap page for what’s coming.";
+}
+
+function chatReply(text, role) {
+  const lower = text.toLowerCase();
+  for (const q of CHAT_QNA) {
+    if (q.keywords.some((k) => lower.includes(k))) return q.answer(role);
+  }
+  return fallbackChatAnswer(text, role);
+}
+
+function ChatbotAssistant({ role }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    if (open && messages.length === 0) {
+      setMessages([
+        { from: "bot", text: role === "driver"
+            ? "Hi! I'm Pulse, your GRIDPULSE assistant. Ask me about navigation, charging, demo accounts, protocol feeds or the roadmap."
+            : "Hi! I'm Pulse, your GRIDPULSE assistant. Ask me about fleet monitoring, protocol gateways, alerts, theft or the roadmap." },
+      ]);
+    }
+  }, [open, role, messages.length]);
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages, busy]);
+
+  const send = (preset) => {
+    const text = (preset ?? input).trim();
+    if (!text || busy) return;
+    setMessages((prev) => [...prev, { from: "user", text }]);
+    setInput("");
+    setBusy(true);
+    setTimeout(() => {
+      setMessages((prev) => [...prev, { from: "bot", text: chatReply(text, role) }]);
+      setBusy(false);
+    }, 550);
+  };
+
+  const suggestions = ["Demo accounts", "OCPP gateway", "Charge planner", "Roadmap"];
+
+  return (
+    <>
+      <button
+        type="button"
+        className="g-chat-fab"
+        onClick={() => setOpen((o) => !o)}
+        title="Ask Pulse, the GRIDPULSE assistant"
+        aria-label="Toggle chatbot assistant"
+      >
+        {open ? <X size={20} /> : <MessageCircle size={20} />}
+      </button>
+
+      {open && (
+        <div className="g-chat">
+          <div className="g-chat-head">
+            <div className="g-chat-avatar"><Bot size={16} /></div>
+            <div className="g-chat-head-main">
+              <div className="g-chat-title">Pulse · Assistant</div>
+              <div className="g-chat-sub"><span className="g-chat-live" /> Online</div>
+            </div>
+            <button type="button" className="g-chat-close" onClick={() => setOpen(false)}>
+              <X size={16} />
+            </button>
+          </div>
+
+          {messages.length === 1 && (
+            <div className="g-chat-suggestions">
+              {suggestions.map((s) => (
+                <button key={s} type="button" className="g-chat-suggestion" onClick={() => send(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="g-chat-list" ref={listRef}>
+            {messages.map((m, i) => (
+              <div className={`g-chat-msg ${m.from === "user" ? "g-chat-msg-user" : "g-chat-msg-bot"}`} key={i}>
+                {m.from === "bot" && <div className="g-chat-msg-avatar"><Bot size={12} /></div>}
+                <div className="g-chat-bubble">{m.text}</div>
+              </div>
+            ))}
+            {busy && (
+              <div className="g-chat-msg g-chat-msg-bot">
+                <div className="g-chat-msg-avatar"><Bot size={12} /></div>
+                <div className="g-chat-bubble g-chat-typing"><span /><span /><span /></div>
+              </div>
+            )}
+          </div>
+
+          <form
+            className="g-chat-input"
+            onSubmit={(e) => { e.preventDefault(); send(); }}
+          >
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask about navigation, protocols, accounts…"
+            />
+            <button type="submit" className="g-chat-send" disabled={busy || !input.trim()}>
+              <Send size={15} />
+            </button>
+          </form>
+        </div>
+      )}
+    </>
+  );
+}
+
 function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) {
   const { loading, error } = useAppData();
   const { nearbyChargers, driverMetrics: m } = useDriverData();
@@ -4160,6 +4490,7 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
     { key: "battery", label: "Battery health", icon: Battery },
     { key: "chargers", label: "Find chargers", icon: MapPin },
     { key: "analytics", label: "Predictive insights", icon: BarChart3 },
+    { key: "roadmap", label: "Roadmap", icon: Rocket },
     { key: "settings", label: "Settings", icon: Settings },
   ];
 
@@ -4275,6 +4606,7 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
         {page === "battery" && <DriverBatteryPage vehicleProfile={vehicleProfile} />}
         {page === "chargers" && <DriverChargersPage preferences={preferences} />}
         {page === "analytics" && <DriverAnalyticsPage onNavigate={setPage} preferences={preferences} />}
+        {page === "roadmap" && <RoadmapPage />}
         {page === "settings" && <DriverSettingsPage preferences={preferences} setPreferences={setPreferences} />}
       </main>
     </div>
@@ -6340,6 +6672,7 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
     { key: "theft", label: "Energy theft", icon: ShieldOff, badge: theftFlags.length },
     { key: "alerts", label: "Alerts", icon: ShieldAlert, badge: anomalies.length },
     { key: "products", label: "Products", icon: Zap },
+    { key: "roadmap", label: "Roadmap", icon: Rocket },
     { key: "settings", label: "Settings", icon: Settings },
   ];
 
@@ -6441,6 +6774,7 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
         {page === "theft" && <OwnerTheftPage preferences={preferences} />}
         {page === "alerts" && <OwnerAlertsPage />}
         {page === "products" && <OwnerProductsPage goToSettings={() => setPage("settings")} onNavigate={setPage} />}
+        {page === "roadmap" && <RoadmapPage />}
         {page === "settings" && (
           <OwnerSettingsPage
             ocppEndpoint={ocppEndpoint} setOcppEndpoint={setOcppEndpoint}
@@ -7627,6 +7961,125 @@ export default function GridPulseApp() {
           background:rgba(255,255,255,0.02); max-width:100%;
         }
         .g-products-live .g-mono{color:${C.textDim}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+        /* ---- roadmap page ---- */
+        .g-roadmap-summary{
+          display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:18px;
+        }
+        .g-roadmap-summary-item{
+          display:flex; flex-direction:column; gap:4px; padding:16px; border-radius:14px;
+          border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.025);
+        }
+        .g-roadmap-summary-v{font-size:26px; font-weight:700; color:${C.text};}
+        .g-roadmap-summary-l{font-size:11px; color:${C.textDim}; font-family:var(--mono); letter-spacing:.04em; text-transform:uppercase;}
+        .g-roadmap{display:flex; flex-direction:column; gap:10px;}
+        .g-roadmap-phase{
+          border:1px solid ${C.borderSoft}; border-radius:14px; background:rgba(255,255,255,0.015);
+          overflow:hidden;
+        }
+        .g-roadmap-phase-open{border-color:${C.border};}
+        .g-roadmap-phase-head{
+          width:100%; display:flex; align-items:center; gap:12px; padding:14px 16px;
+          background:none; border:none; color:${C.text}; text-align:left; font-family:inherit;
+        }
+        .g-roadmap-phase-icon{
+          width:30px; height:30px; border-radius:9px; display:flex; align-items:center; justify-content:center;
+          border:1px solid; flex-shrink:0;
+        }
+        .g-roadmap-phase-label{font-size:14px; font-weight:600; flex:1;}
+        .g-roadmap-phase-count{font-size:11px; color:${C.textDimmer};}
+        .g-roadmap-phase-body{
+          display:flex; flex-direction:column; gap:4px; padding:4px 16px 16px;
+        }
+        .g-roadmap-item{
+          display:flex; align-items:flex-start; gap:12px; padding:12px 14px; border-radius:12px;
+          border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.02);
+        }
+        .g-roadmap-item-dot{
+          width:9px; height:9px; border-radius:50%; margin-top:5px; flex-shrink:0;
+          box-shadow:0 0 10px currentColor;
+        }
+        .g-roadmap-item-main{flex:1; min-width:0;}
+        .g-roadmap-item-title{font-size:13.5px; font-weight:600; color:${C.text}; margin-bottom:4px;}
+        .g-roadmap-item-detail{font-size:12px; color:${C.textDim}; line-height:1.5;}
+        .g-roadmap-item-tag{font-size:9.5px; letter-spacing:.1em; padding:3px 7px; border-radius:8px; border:1px solid currentColor; opacity:.85; flex-shrink:0;}
+        .g-roadmap-note{
+          display:flex; gap:10px; margin-top:18px; padding:14px 16px; border-radius:12px;
+          border:1px solid rgba(79,227,255,0.2); background:${C.cyanSoft}; font-size:12.5px; color:${C.text}; line-height:1.55;
+        }
+        @media(max-width:640px){ .g-roadmap-summary{grid-template-columns:1fr;} }
+
+        /* ---- chatbot assistant ---- */
+        .g-chat-fab{
+          position:fixed; right:22px; bottom:22px; z-index:1500;
+          width:54px; height:54px; border-radius:50%; border:none; cursor:pointer;
+          background:${C.cyan}; color:#001217; display:flex; align-items:center; justify-content:center;
+          box-shadow:0 8px 28px rgba(79,227,255,0.35); transition:transform .15s ease, background .15s ease;
+        }
+        .g-chat-fab:hover{transform:translateY(-2px); background:#6dea; }
+        .g-chat{
+          position:fixed; right:22px; bottom:88px; z-index:1500;
+          width:min(380px, calc(100vw - 32px)); height:min(540px, calc(100vh - 130px));
+          display:flex; flex-direction:column; overflow:hidden;
+          background:${C.panelSolid}; border:1px solid ${C.border}; border-radius:18px;
+          box-shadow:0 20px 60px rgba(0,0,0,0.5); backdrop-filter:blur(18px);
+          animation:g-chat-in .2s ease;
+        }
+        @keyframes g-chat-in{from{opacity:0; transform:translateY(12px);}to{opacity:1; transform:translateY(0);}}
+        .g-chat-head{
+          display:flex; align-items:center; gap:10px; padding:14px 16px;
+          border-bottom:1px solid ${C.borderSoft};
+        }
+        .g-chat-avatar{
+          width:32px; height:32px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+          background:${C.cyan}; color:#001217; flex-shrink:0;
+        }
+        .g-chat-head-main{flex:1; min-width:0;}
+        .g-chat-title{font-size:13.5px; font-weight:600; color:${C.text};}
+        .g-chat-sub{display:flex; align-items:center; gap:5px; font-size:11px; color:${C.textDim};}
+        .g-chat-live{width:7px; height:7px; border-radius:50%; background:${C.green}; box-shadow:0 0 8px ${C.green};}
+        .g-chat-close{
+          background:none; border:none; color:${C.textDimmer}; padding:6px; border-radius:8px;
+          display:flex; transition:background .15s ease, color .15s ease;
+        }
+        .g-chat-close:hover{background:rgba(255,255,255,0.06); color:${C.text};}
+        .g-chat-suggestions{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px; border-bottom:1px solid ${C.borderSoft};}
+        .g-chat-suggestion{
+          padding:6px 11px; border-radius:16px; border:1px solid ${C.border};
+          background:${C.cyanSoft}; color:${C.cyan}; font-size:11.5px; transition:border-color .15s ease, background .15s ease;
+        }
+        .g-chat-suggestion:hover{border-color:${C.cyan}; background:rgba(79,227,255,0.2);}
+        .g-chat-list{flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px;}
+        .g-chat-msg{display:flex; align-items:flex-end; gap:8px; max-width:88%;}
+        .g-chat-msg-bot{align-self:flex-start;}
+        .g-chat-msg-user{align-self:flex-end; flex-direction:row-reverse;}
+        .g-chat-msg-avatar{
+          width:22px; height:22px; border-radius:7px; display:flex; align-items:center; justify-content:center;
+          background:${C.cyanSoft}; color:${C.cyan}; flex-shrink:0;
+        }
+        .g-chat-bubble{
+          padding:10px 13px; border-radius:14px; font-size:12.8px; line-height:1.5;
+          border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.03); color:${C.text};
+        }
+        .g-chat-msg-user .g-chat-bubble{background:${C.cyan}; color:#001217; border-color:${C.cyan};}
+        .g-chat-typing{display:flex; gap:4px; align-items:center; padding:14px;}
+        .g-chat-typing span{width:6px; height:6px; border-radius:50%; background:${C.textDimmer}; animation:g-blink 1.2s infinite;}
+        .g-chat-typing span:nth-child(2){animation-delay:.15s;}
+        .g-chat-typing span:nth-child(3){animation-delay:.3s;}
+        .g-chat-input{
+          display:flex; gap:8px; padding:12px 14px; border-top:1px solid ${C.borderSoft};
+        }
+        .g-chat-input input{
+          flex:1; min-width:0; background:rgba(255,255,255,0.04); border:1px solid ${C.border};
+          border-radius:10px; padding:10px 12px; color:${C.text}; font-size:13px; outline:none; font-family:inherit;
+        }
+        .g-chat-input input::placeholder{color:${C.textDimmer};}
+        .g-chat-input input:focus{border-color:${C.cyan};}
+        .g-chat-send{
+          width:40px; height:40px; border-radius:10px; border:none; display:flex; align-items:center; justify-content:center;
+          background:${C.cyan}; color:#001217; transition:opacity .15s ease;
+        }
+        .g-chat-send:disabled{opacity:.4; cursor:not-allowed;}
       `}</style>
 
       {!session ? (
@@ -7646,6 +8099,7 @@ export default function GridPulseApp() {
           {session.role === "ev"
             ? <DriverDashboard name={session.name} preferences={preferences} setPreferences={setPreferences} vehicleProfile={session.vehicle} />
             : <OwnerDashboard name={session.name} preferences={preferences} setPreferences={setPreferences} />}
+          <ChatbotAssistant role={session.role === "ev" ? "driver" : "owner"} />
           <HelpModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} />
         </>
       )}
