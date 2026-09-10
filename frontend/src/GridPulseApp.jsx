@@ -4324,8 +4324,16 @@ const CHAT_QNA = [
     answer: () => "ANPR reads license plates to detect charging theft. Events POST to /api/v1/plate-events and are correlated with sessions on the Energy theft page.",
   },
   {
-    keywords: ["weather", "gps", "plan", "trip", "range"],
-    answer: () => "The trip planner combines GPS, live weather (Open-Meteo) and your range to recommend charge stops. Cold or hot weather adjusts estimated range automatically.",
+    keywords: ["weather", "gps", "plan", "trip", "range", "location"],
+    answer: (role) => role === "driver"
+      ? "The trip planner combines GPS, live weather (Open-Meteo) and your range to recommend charge stops. Cold or hot weather adjusts estimated range automatically. Use the 'Use my location' button to get results sorted by your real position."
+      : "Live site weather is fetched from Open-Meteo using GPS coordinates, and range/load forecasts fold that temperature in for more accurate estimates.",
+  },
+  {
+    keywords: ["gps", "location", "pulse", "weather"],
+    answer: (role) => role === "driver"
+      ? "GRIDPULSE asks permission to use your device location. Grant it once and nearby chargers get re-sorted by road distance, and live weather at your position shapes range and charging estimates."
+      : "GRIDPULSE can use device location to sort chargers by distance and pull local weather. Grant the location prompt when asked.",
   },
   {
     keywords: ["roadmap", "planned", "update", "upcoming", "future", "new feature"],
@@ -4355,19 +4363,80 @@ const CHAT_QNA = [
   },
 ];
 
-function fallbackChatAnswer(text, role) {
-  const lower = text.toLowerCase();
-  if (role === "driver" && lower.includes("range")) return "Estimated range uses your current SoC, battery health and weather. Head to Overview for the live figure.";
-  if (role === "owner" && lower.includes("grid")) return "The Grid & energy page tracks live load, solar and demand across your sites.";
-  if (lower.includes("password")) return "Owner: GRIDPULSE / owner123 · Driver: TN84DR5021 / demo123.";
-  return "I’m a rule-based assistant, so I cover the core GRIDPULSE topics (navigation, protocol feeds, demo accounts and the roadmap). Try rephrasing, or take a look at the Roadmap page for what’s coming.";
-}
+const CHAT_STOPWORDS = new Set([
+  "the", "a", "an", "is", "are", "was", "were", "how", "what", "when", "where",
+  "which", "who", "why", "can", "could", "would", "should", "do", "does", "did",
+  "will", "please", "just", "about", "for", "with", "and", "or", "but", "of",
+  "in", "on", "at", "to", "my", "your", "me", "i", "you", "we", "it", "this",
+  "that", "there", "have", "has", "help",
+]);
 
 function chatReply(text, role) {
+  return smartChatReply(text, role);
+}
+
+const CHAT_SYNONYMS = {
+  station: "charger", stations: "charger", ev: "charging", map: "chargers",
+  nearby: "chargers", location: "gps", gps: "location", connect: "gateway",
+  connection: "gateway", protocol: "ocpp", meter: "energy", meters: "energy",
+  tariff: "cost", rates: "cost", price: "cost", money: "cost", wallet: "cost",
+  invoice: "cost", green: "solar", renewable: "solar", clean: "solar",
+  carbon: "co2", emissions: "co2", theft: "anpr", plate: "anpr", plates: "anpr",
+  camera: "anpr", cctv: "anpr", demo: "account", login: "account", signin: "account",
+};
+
+function tokenize(text) {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 1 && !CHAT_STOPWORDS.has(t))
+    .map((t) => CHAT_SYNONYMS[t] || t);
+}
+
+/* Smart scorer: boosts strong single-topic matches, tolerates near-miss
+   phrasing, and stays conversational. Outranks the old keyword matcher. */
+function smartChatReply(text, role) {
   const lower = text.toLowerCase();
+  const tokens = new Set(tokenize(text));
+
+  /* role-aware convenience answers */
+  if (role === "driver" && lower.includes("range")) return "Estimated range uses your current SoC, battery health and weather. Head to Overview for the live figure.";
+  if (role === "owner" && (lower.includes("grid") || lower.includes("energy"))) return "The Grid & energy page tracks live load, solar and demand across your sites in real time.";
+
+  let best = null;
   for (const q of CHAT_QNA) {
-    if (q.keywords.some((k) => lower.includes(k))) return q.answer(role);
+    const group = new Set(q.keywords.map((k) => k.toLowerCase()));
+    let score = 0;
+    let hits = 0;
+    for (const t of tokens) {
+      if (group.has(t)) {
+        score += 3;
+        hits++;
+      } else {
+        for (const k of group) {
+          if ((t.includes(k) && k.length >= 4) || (k.includes(t) && t.length >= 3)) {
+            score += 2;
+            hits++;
+            break;
+          }
+        }
+      }
+    }
+    if (hits === 0 && tokens.size >= 1) {
+      for (const k of group) {
+        if (lower.includes(k)) {
+          score += 1;
+          hits++;
+          break;
+        }
+      }
+    }
+    if (score > 0 && (best === null || score > best.score)) {
+      best = { score, answer: q.answer(role) };
+    }
   }
+  if (best && best.score >= 3) return best.answer;
   return fallbackChatAnswer(text, role);
 }
 

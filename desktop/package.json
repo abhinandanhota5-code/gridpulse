@@ -50,6 +50,10 @@
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
       "notarize": true,
+      "extendInfo": {
+        "NSLocationWhenInUseUsageDescription": "GRIDPULSE uses your location to show nearby EV chargers, sort them by road distance, and pull live weather at your position for range and charging estimates.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "GRIDPULSE uses your location to show nearby EV chargers, sort them by road distance, and pull live weather at your position for range and charging estimates."
+      },
       "target": [
         "dmg",
         "zip"
