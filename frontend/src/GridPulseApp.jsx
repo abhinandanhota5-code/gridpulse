@@ -237,6 +237,10 @@ function useGeolocation() {
       return;
     }
     setState("loading");
+    setError("");
+    /* Coarse accuracy resolves fast and works indoors — plenty for charger
+       sorting and local weather. High accuracy + short timeout is what made
+       GPS time out before the OS permission prompt could even be answered. */
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setLoc({
@@ -251,18 +255,41 @@ function useGeolocation() {
       (err) => {
         if (err.code === err.PERMISSION_DENIED) {
           setState("denied");
-          setError("Location access was blocked. Allow it for this site, then retry.");
+          setError("Location access was blocked. Allow it for this site in the macOS/System prompt, then retry.");
         } else if (err.code === err.POSITION_UNAVAILABLE) {
           setState("error");
-          setError("No satellite/GPS fix yet — try moving outdoors and retry.");
+          setError("Couldn't get a location fix — check that Wi-Fi is on, or retry in a moment.");
         } else {
           setState("error");
-          setError("Timed out getting a GPS fix — retry.");
+          setError("Timed out getting a GPS fix. If a location prompt appeared, allow it and hit retry.");
         }
       },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+      /* 45s so users can approve the macOS permission prompt in time. */
+      { enableHighAccuracy: false, timeout: 45000, maximumAge: 60000 }
     );
   }, []);
+
+  /* If permission was already granted on a previous launch, grab a fix
+     automatically so the map/lists are sorted right away. Also surface a
+     clear message if the user later revokes it in System Settings. */
+  useEffect(() => {
+    if (!navigator.permissions || !navigator.permissions.query) return;
+    let cancelled = false;
+    navigator.permissions
+      .query({ name: "geolocation" })
+      .then((perm) => {
+        if (cancelled) return;
+        if (perm.state === "granted") request();
+        const onChange = () => {
+          if (perm.state === "denied") {
+            setError("Location access was blocked. Enable it for GRIDPULSE in System Settings, then retry.");
+          }
+        };
+        perm.addEventListener?.("change", onChange);
+      })
+      .catch(() => { /* permissions API not supported; manual request only */ });
+    return () => { cancelled = true; };
+  }, [request]);
 
   return { loc, state, error, request };
 }
@@ -4445,7 +4472,30 @@ function ChatbotAssistant({ role }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [aiMode, setAiMode] = useState("local");
+  const [aiModel, setAiModel] = useState("");
+  const [aiConfigOpen, setAiConfigOpen] = useState(false);
+  const [aiKey, setAiKey] = useState(() => localStorage.getItem("gp_ai_key") || "");
+  const [aiModelInput, setAiModelInput] = useState(() => localStorage.getItem("gp_ai_model") || "");
+  const [aiBaseInput, setAiBaseInput] = useState(() => localStorage.getItem("gp_ai_base") || "https://api.openai.com/v1");
+  const [aiNote, setAiNote] = useState("");
   const listRef = useRef(null);
+
+  useEffect(() => {
+    if (open) {
+      fetch(`${API_BASE_URL}/api/chat/config`)
+        .then((r) => r.json())
+        .then((cfg) => {
+          if (cfg?.ai || aiKey) {
+            setAiMode("ai");
+            setAiModel(cfg?.model || aiModelInput || "default");
+          } else {
+            setAiMode("local");
+          }
+        })
+        .catch(() => setAiMode("local"));
+    }
+  }, [open, aiKey, aiModelInput]);
 
   useEffect(() => {
     if (open && messages.length === 0) {
@@ -4461,16 +4511,52 @@ function ChatbotAssistant({ role }) {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages, busy]);
 
-  const send = (preset) => {
+  const saveAiConfig = () => {
+    localStorage.setItem("gp_ai_key", aiKey.trim());
+    localStorage.setItem("gp_ai_model", aiModelInput.trim());
+    localStorage.setItem("gp_ai_base", aiBaseInput.trim());
+    setAiMode(aiKey.trim() ? "ai" : "local");
+    setAiNote("");
+    setAiConfigOpen(false);
+  };
+
+  const send = async (preset) => {
     const text = (preset ?? input).trim();
     if (!text || busy) return;
     setMessages((prev) => [...prev, { from: "user", text }]);
     setInput("");
     setBusy(true);
-    setTimeout(() => {
-      setMessages((prev) => [...prev, { from: "bot", text: chatReply(text, role) }]);
-      setBusy(false);
-    }, 550);
+
+    let reply = chatReply(text, role);
+    let mode = "local";
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          history: messages.slice(-8),
+          apiKey: aiKey.trim() || undefined,
+          baseURL: aiBaseInput.trim() || undefined,
+          model: aiModelInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data?.mode === "ai" && data.reply) {
+        reply = data.reply;
+        mode = "ai";
+        setAiModel(data.model || aiModel);
+      }
+      if (data?.note) setAiNote(data.note);
+      else if (mode === "local" && !aiKey) setAiNote("Offline knowledge mode — add an AI key in the assistant settings for smarter answers.");
+    } catch (_) {
+      setAiNote("Assistant server unavailable — using offline knowledge mode.");
+    }
+
+    setMessages((prev) => [...prev, { from: "bot", text: reply }]);
+    setAiMode(mode);
+    setBusy(false);
   };
 
   const suggestions = ["Demo accounts", "OCPP gateway", "Charge planner", "Roadmap"];
@@ -4493,12 +4579,56 @@ function ChatbotAssistant({ role }) {
             <div className="g-chat-avatar"><Bot size={16} /></div>
             <div className="g-chat-head-main">
               <div className="g-chat-title">Pulse · Assistant</div>
-              <div className="g-chat-sub"><span className="g-chat-live" /> Online</div>
+              <div className="g-chat-sub">
+                <span className={`g-chat-live ${aiMode === "ai" ? "g-chat-live-ai" : ""}`} />
+                {aiMode === "ai" ? `AI · ${aiModel || "connected"}` : "Offline knowledge"}
+              </div>
             </div>
+            <button type="button" className="g-chat-gear" onClick={() => setAiConfigOpen((o) => !o)} title="AI settings">
+              <Settings size={15} />
+            </button>
             <button type="button" className="g-chat-close" onClick={() => setOpen(false)}>
               <X size={16} />
             </button>
           </div>
+
+          {aiConfigOpen && (
+            <div className="g-chat-aiconfig">
+              <label className="g-chat-ai-label">API key (any OpenAI-compatible provider)</label>
+              <input
+                type="password"
+                className="g-chat-ai-input"
+                value={aiKey}
+                onChange={(e) => setAiKey(e.target.value)}
+                placeholder="sk-…"
+                autoComplete="off"
+              />
+              <label className="g-chat-ai-label">Model</label>
+              <input
+                type="text"
+                className="g-chat-ai-input"
+                value={aiModelInput}
+                onChange={(e) => setAiModelInput(e.target.value)}
+                placeholder="gpt-4o-mini"
+              />
+              <label className="g-chat-ai-label">Base URL</label>
+              <input
+                type="text"
+                className="g-chat-ai-input"
+                value={aiBaseInput}
+                onChange={(e) => setAiBaseInput(e.target.value)}
+                placeholder="https://api.openai.com/v1"
+              />
+              <div className="g-chat-ai-actions">
+                <button type="button" className="g-chat-ai-save" onClick={saveAiConfig}>Save</button>
+                <span className="g-chat-ai-hint">Supports OpenAI, Groq, OpenRouter, Together, Ollama…</span>
+              </div>
+            </div>
+          )}
+
+          {(aiNote && !aiConfigOpen) && (
+            <div className="g-chat-note">{aiNote}</div>
+          )}
 
           {messages.length === 1 && (
             <div className="g-chat-suggestions">
@@ -8107,6 +8237,30 @@ export default function GridPulseApp() {
         .g-chat-title{font-size:13.5px; font-weight:600; color:${C.text};}
         .g-chat-sub{display:flex; align-items:center; gap:5px; font-size:11px; color:${C.textDim};}
         .g-chat-live{width:7px; height:7px; border-radius:50%; background:${C.green}; box-shadow:0 0 8px ${C.green};}
+        .g-chat-live-ai{background:${C.cyan}; box-shadow:0 0 8px ${C.cyan};}
+        .g-chat-gear{
+          background:none; border:none; color:${C.textDimmer}; padding:6px; border-radius:8px;
+          display:flex; transition:background .15s ease, color .15s ease;
+        }
+        .g-chat-gear:hover{background:rgba(255,255,255,0.06); color:${C.text};}
+        .g-chat-note{padding:7px 14px; font-size:11px; color:${C.textDimmer}; background:rgba(255,255,255,0.03); border-bottom:1px solid ${C.borderSoft};}
+        .g-chat-aiconfig{
+          padding:12px 14px; border-bottom:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.02);
+          display:flex; flex-direction:column; gap:6px;
+        }
+        .g-chat-ai-label{font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; color:${C.textDim}; margin-top:2px;}
+        .g-chat-ai-input{
+          width:100%; background:rgba(255,255,255,0.04); border:1px solid ${C.border}; border-radius:8px;
+          padding:8px 10px; color:${C.text}; font-size:12.5px; outline:none; font-family:inherit; box-sizing:border-box;
+        }
+        .g-chat-ai-input:focus{border-color:${C.cyan};}
+        .g-chat-ai-actions{display:flex; align-items:center; gap:10px; margin-top:4px;}
+        .g-chat-ai-save{
+          background:${C.cyan}; color:#001217; border:none; border-radius:8px; padding:7px 14px;
+          font-size:12px; font-weight:600; cursor:pointer; transition:opacity .15s ease;
+        }
+        .g-chat-ai-save:hover{opacity:.85;}
+        .g-chat-ai-hint{font-size:10.5px; color:${C.textDimmer};}
         .g-chat-close{
           background:none; border:none; color:${C.textDimmer}; padding:6px; border-radius:8px;
           display:flex; transition:background .15s ease, color .15s ease;

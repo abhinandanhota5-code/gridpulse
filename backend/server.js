@@ -12,6 +12,7 @@ const { registerOpenAdr } = require("./openadr");
 const { buildDriverData, buildOwnerData } = require("./merge");
 const fx = require("./fx");
 const { fetchWeather } = require("./weather");
+const chat = require("./chat");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -94,6 +95,24 @@ app.post("/api/auth/login", (req, res) => {
   const safeRole = role === "owner" ? "owner" : "ev";
   const name = (email && String(email).trim()) || (safeRole === "ev" ? "Driver" : "Fleet Manager");
   res.json({ name, role: safeRole });
+});
+
+/* ---- assistant chat (LLM-backed, with local fallback) ---- */
+app.get("/api/chat/config", (_req, res) => {
+  res.json({
+    ai: chat.configured(),
+    model: chat.effectiveModel(),
+    note: chat.configured()
+      ? "AI assistant connected via server config."
+      : "No AI provider key set — chat runs in offline knowledge mode. Add a key in the assistant settings or set GRIDPULSE_AI_API_KEY."
+  });
+});
+
+app.post("/api/chat", async (req, res) => {
+  const { message, history, apiKey, baseURL, model } = req.body || {};
+  const text = String(message || "").trim();
+  if (!text) return res.status(400).json({ error: "message required", mode: "local" });
+  res.json(await chat.ask({ message: text, history, apiKey, baseURL, model }));
 });
 
 /* ---- edge-agent ingest bridges (Josev V2G + VOLTTRON) ---- */
