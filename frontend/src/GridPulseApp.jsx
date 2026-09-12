@@ -4578,28 +4578,6 @@ function tokenize(text) {
     .map((t) => CHAT_SYNONYMS[t] || t);
 }
 
-function fallbackChatAnswer(text, role) {
-  const lower = text.toLowerCase();
-  if (/(improve|improvement|weakness|metric|measure|benchmark|score|evidence|impact)/i.test(lower)) {
-    return "A practical improvement story for GRIDPULSE is to benchmark real signals like charging cost, uptime, peak-load reduction, and range accuracy, then target the largest operational bottleneck and measure the effect after the fix.";
-  }
-  if (role === "driver" && /(range|battery|weather|planner)/i.test(lower)) {
-    return "Use the Overview and Charge planner together: GRIDPULSE blends your SoC, battery health, and live weather to estimate range and suggest the best charging window.";
-  }
-  if (role === "owner" && /(gateway|ocpp|modbus|openadr|alerts|fleet|grid)/i.test(lower)) {
-    return "The owner experience is centered on the Live gateway and Grid & energy pages, where OCPP, MODBUS, OpenADR, ANPR, and fleet telemetry are combined into a single operational view.";
-  }
-  if (/(demo|account|login|password)/i.test(lower)) {
-    return role === "driver"
-      ? "Driver demo: TN84DR5021 / demo123. Owner demo: GRIDPULSE / owner123."
-      : "Owner demo: GRIDPULSE / owner123. Driver demo: TN84DR5021 / demo123.";
-  }
-  if (/(ocpp|gateway|protocol|charger|websocket)/i.test(lower)) {
-    return "GRIDPULSE speaks raw OCPP 1.6J / 2.0.1 over WebSocket. The Live gateway page shows the data in real time.";
-  }
-  return "I can help with GRIDPULSE navigation, demo access, live protocol feeds, charging strategies, and the hackathon story. Try asking about the planner, OCPP, demo accounts, or the PRISM angle.";
-}
-
 /* Smart scorer: boosts strong single-topic matches, tolerates near-miss
    phrasing, and stays conversational. Outranks the old keyword matcher. */
 function smartChatReply(text, role) {
@@ -4652,10 +4630,24 @@ function smartChatReply(text, role) {
 
 function fallbackChatAnswer(text, role) {
   const lower = text.toLowerCase();
-  const suggestions = role === "driver"
-    ? ["charge planner", "demo accounts", "find chargers", "battery health"]
-    : ["OCPP gateway", "energy theft", "fleet overview", "demo accounts"];
 
+  if (/(improve|improvement|weakness|metric|measure|benchmark|score|evidence|impact)/i.test(lower)) {
+    return "A practical improvement story for GRIDPULSE is to benchmark real signals like charging cost, uptime, peak-load reduction, and range accuracy, then target the largest operational bottleneck and measure the effect after the fix.";
+  }
+  if (role === "driver" && /(range|battery|weather|planner)/i.test(lower)) {
+    return "Use the Overview and Charge planner together: GRIDPULSE blends your SoC, battery health, and live weather to estimate range and suggest the best charging window.";
+  }
+  if (role === "owner" && /(gateway|ocpp|modbus|openadr|alerts|fleet|grid)/i.test(lower)) {
+    return "The owner experience is centered on the Live gateway and Grid & energy pages, where OCPP, MODBUS, OpenADR, ANPR, and fleet telemetry are combined into a single operational view.";
+  }
+  if (/(demo|account|login|password)/i.test(lower)) {
+    return role === "driver"
+      ? "Driver demo: TN84DR5021 / demo123. Owner demo: GRIDPULSE / owner123."
+      : "Owner demo: GRIDPULSE / owner123. Driver demo: TN84DR5021 / demo123.";
+  }
+  if (/(ocpp|gateway|protocol|charger|websocket)/i.test(lower)) {
+    return "GRIDPULSE speaks raw OCPP 1.6J / 2.0.1 over WebSocket. The Live gateway page shows the data in real time.";
+  }
   if (lower.match(/\b(battery|capacity|degrad|cycle|health)\b/)) {
     return role === "driver"
       ? "Battery health shows capacity retention, charge cycles and projected degradation on the Battery Health page. Head there from the sidebar."
@@ -4694,8 +4686,7 @@ function fallbackChatAnswer(text, role) {
     return "I'm Pulse, the GRIDPULSE in-app assistant. I can help with navigation, demo accounts, protocols (OCPP, MODBUS, OpenADR, ISO 15118, ANPR), the roadmap, and more.";
   }
 
-  const tag = role === "driver" ? "driver" : "fleet owner";
-  return `I'm not sure about that yet, but I'm always learning! Try asking about demo accounts, the charge planner, OCPP gateway, or the roadmap. As a ${tag}, you can also ask about any dashboard page.`;
+  return "I can help with GRIDPULSE navigation, demo access, live protocol feeds, charging strategies, and the hackathon story. Try asking about the planner, OCPP, demo accounts, or the PRISM angle.";
 }
 
 function ChatbotAssistant({ role }) {
