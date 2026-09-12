@@ -8,10 +8,17 @@ VOLTTRON and ANPR right out of the box.
   smart charge planner (grid/solar/demand-response aware), predictive insights.
 - **Owner view** — fleet/grid/energy/battery/alerts/theft monitoring with live
   protocol telemetry and forecasting.
+- **Operational insight** — the product helps surface cost, uptime, load,
+  reliability and forecasting tradeoffs across real EV charging operations.
 - **One deployable unit** — the backend serves the built frontend (single
   service for Render or any Node host).
 - **Desktop app** — bundled, double-click install for macOS & Windows, with a
   built-in Setup guide; ships everything needed, no Node.js install required.
+
+GRIDPULSE is designed to show how connected EV infrastructure, live telemetry,
+and operator-friendly analytics can be packaged into a usable operating system for
+charging decision-making. The experience is practical, measurable, and grounded in
+real operational signals rather than a single static mockup.
 
 ## Repo layout
 

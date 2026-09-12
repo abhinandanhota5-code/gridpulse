@@ -1199,9 +1199,9 @@ function LoginScreen({ onLogin }) {
           .
         </h1>
         <p className="g-login-sub">
-          Drivers see their charging session and battery health.
-          Fleet and station owners see every charger, every anomaly,
-          every maintenance call — across the whole network.
+          Drivers see their charging session and battery health. Fleet and station
+          owners see every charger, every anomaly, and every maintenance call across
+          the whole network.
         </p>
         <div className="g-login-loop">
           {["Observe", "Detect", "Predict", "Optimize", "Act"].map((s, i, arr) => (
@@ -4375,6 +4375,10 @@ const CHAT_QNA = [
     answer: () => "The smart charge planner can prioritise solar/green windows and shows CO2 avoided over your lifetime on the Overview.",
   },
   {
+    keywords: ["improve", "improvement", "weakness", "metric", "measure", "success", "outcome", "impact", "kpi"],
+    answer: () => "A good improvement story for GRIDPULSE is to benchmark real signals like charging cost, charger uptime, peak-load reduction, and range accuracy, then target the biggest operational bottleneck and measure the impact after the fix.",
+  },
+  {
     keywords: ["help", "shortcut", "keyboard", "navigation"],
     answer: () => "Press Ctrl/Cmd + / for the help modal with keyboard shortcuts, or Ctrl/Cmd + K to focus quick search.",
   },
@@ -4421,6 +4425,28 @@ function tokenize(text) {
     .map((t) => CHAT_SYNONYMS[t] || t);
 }
 
+function fallbackChatAnswer(text, role) {
+  const lower = text.toLowerCase();
+  if (/(improve|improvement|weakness|metric|measure|benchmark|score|evidence|impact)/i.test(lower)) {
+    return "A practical improvement story for GRIDPULSE is to benchmark real signals like charging cost, uptime, peak-load reduction, and range accuracy, then target the largest operational bottleneck and measure the effect after the fix.";
+  }
+  if (role === "driver" && /(range|battery|weather|planner)/i.test(lower)) {
+    return "Use the Overview and Charge planner together: GRIDPULSE blends your SoC, battery health, and live weather to estimate range and suggest the best charging window.";
+  }
+  if (role === "owner" && /(gateway|ocpp|modbus|openadr|alerts|fleet|grid)/i.test(lower)) {
+    return "The owner experience is centered on the Live gateway and Grid & energy pages, where OCPP, MODBUS, OpenADR, ANPR, and fleet telemetry are combined into a single operational view.";
+  }
+  if (/(demo|account|login|password)/i.test(lower)) {
+    return role === "driver"
+      ? "Driver demo: TN84DR5021 / demo123. Owner demo: GRIDPULSE / owner123."
+      : "Owner demo: GRIDPULSE / owner123. Driver demo: TN84DR5021 / demo123.";
+  }
+  if (/(ocpp|gateway|protocol|charger|websocket)/i.test(lower)) {
+    return "GRIDPULSE speaks raw OCPP 1.6J / 2.0.1 over WebSocket. The Live gateway page shows the data in real time.";
+  }
+  return "I can help with GRIDPULSE navigation, demo access, live protocol feeds, charging strategies, and the hackathon story. Try asking about the planner, OCPP, demo accounts, or the PRISM angle.";
+}
+
 /* Smart scorer: boosts strong single-topic matches, tolerates near-miss
    phrasing, and stays conversational. Outranks the old keyword matcher. */
 function smartChatReply(text, role) {
@@ -4430,6 +4456,10 @@ function smartChatReply(text, role) {
   /* role-aware convenience answers */
   if (role === "driver" && lower.includes("range")) return "Estimated range uses your current SoC, battery health and weather. Head to Overview for the live figure.";
   if (role === "owner" && (lower.includes("grid") || lower.includes("energy"))) return "The Grid & energy page tracks live load, solar and demand across your sites in real time.";
+
+  if (/(improve|improvement|weakness|metric|measure|benchmark|score|evidence|impact)/i.test(lower)) {
+    return "A realistic improvement story for GRIDPULSE is to benchmark charging cost, uptime, peak-load reduction, and range accuracy against the current system, then optimize the bottleneck and study the delta after the change.";
+  }
 
   let best = null;
   for (const q of CHAT_QNA) {
@@ -4501,8 +4531,8 @@ function ChatbotAssistant({ role }) {
     if (open && messages.length === 0) {
       setMessages([
         { from: "bot", text: role === "driver"
-            ? "Hi! I'm Pulse, your GRIDPULSE assistant. Ask me about navigation, charging, demo accounts, protocol feeds or the roadmap."
-            : "Hi! I'm Pulse, your GRIDPULSE assistant. Ask me about fleet monitoring, protocol gateways, alerts, theft or the roadmap." },
+            ? "Hi! I'm Pulse, your GRIDPULSE assistant. I can help with navigation, charging strategy, demo accounts, protocol feeds, and product questions about the platform."
+            : "Hi! I'm Pulse, your GRIDPULSE assistant. I can help with fleet monitoring, protocol gateways, alerts, theft, and operational questions about the platform." },
       ]);
     }
   }, [open, role, messages.length]);
