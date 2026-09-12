@@ -1,24 +1,23 @@
 # GRIDPULSE
 
-Live EV-charging dashboards for drivers and fleet owners, backed by a real-time
-**protocol gateway** that speaks OCPP, MODBUS, OpenADR, ISO 15118 (Josev),
-VOLTTRON and ANPR right out of the box.
+Live EV charging intelligence for drivers and fleet operators, powered by a
+real-time **protocol gateway** that speaks OCPP, MODBUS, OpenADR, ISO 15118
+(Josev), VOLTTRON and ANPR right out of the box.
 
-- **Driver view** — live charger map, GPS + realtime weather trip planner,
-  smart charge planner (grid/solar/demand-response aware), predictive insights.
-- **Owner view** — fleet/grid/energy/battery/alerts/theft monitoring with live
+- **Driver experience** — live charger map, GPS-aware trip planning, weather-aware
+  range estimates, and smart charging suggestions built around tariff and grid signals.
+- **Fleet operations** — fleet/grid/energy/battery/alerts/theft monitoring with live
   protocol telemetry and forecasting.
-- **Operational insight** — the product helps surface cost, uptime, load,
-  reliability and forecasting tradeoffs across real EV charging operations.
-- **One deployable unit** — the backend serves the built frontend (single
-  service for Render or any Node host).
-- **Desktop app** — bundled, double-click install for macOS & Windows, with a
-  built-in Setup guide; ships everything needed, no Node.js install required.
+- **Operational insight** — surface cost, uptime, load, reliability and forecasting
+  tradeoffs across real charging networks.
+- **Single-service deployment** — the backend serves the built frontend in one deployable
+  app, ready for Render or any Node-based host.
+- **Desktop-ready build** — bundled, native install experience for macOS and Windows,
+  with a built-in setup guide and no separate Node installation required.
 
-GRIDPULSE is designed to show how connected EV infrastructure, live telemetry,
-and operator-friendly analytics can be packaged into a usable operating system for
-charging decision-making. The experience is practical, measurable, and grounded in
-real operational signals rather than a single static mockup.
+GRIDPULSE is built to make connected EV infrastructure feel operationally useful:
+not just dashboards, but a working decision layer for charging, energy planning,
+and network reliability grounded in live data.
 
 ## Repo layout
 

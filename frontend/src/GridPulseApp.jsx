@@ -1192,16 +1192,16 @@ function LoginScreen({ onLogin }) {
           <span>GRIDPULSE</span>
         </div>
         <h1 className="g-login-headline">
-          Charging, tuned to the{" "}
+          EV charging, tuned to the{" "}
           <span className="g-grad-text">
-            <RotatingWord words={["live grid", "clean energy", "demand signals", "the hour ahead"]} />
+            <RotatingWord words={["live grid", "clean energy", "demand signals", "hour-ahead decisions"]} />
           </span>
           .
         </h1>
         <p className="g-login-sub">
-          Drivers see their charging session and battery health. Fleet and station
-          owners see every charger, every anomaly, and every maintenance call across
-          the whole network.
+          GRIDPULSE brings together charging behavior, live telemetry, and network
+          intelligence so drivers can plan better and operators can manage the fleet
+          with more clarity.
         </p>
         <div className="g-login-loop">
           {["Observe", "Detect", "Predict", "Optimize", "Act"].map((s, i, arr) => (
