@@ -16,7 +16,7 @@ import {
   Rocket, MessageCircle, Send, Sparkles, Bot, CircleDot, GitBranch
 } from "lucide-react";
 
-import { C, STATUS_COLOR, CONFIDENCE_COLOR } from "./theme.js";
+import { C, STATUS_COLOR, CONFIDENCE_COLOR, applyTheme } from "./theme.js";
 import { useAppData, useDriverData, useOwnerData, useLiveData } from "./DataContext.jsx";
 import { api, API_BASE_URL, wsBaseUrl, PLATE_EVENT_SAMPLE } from "./api.js";
 import L from "leaflet";
@@ -1022,7 +1022,7 @@ function ensureDemoAccounts() {
   return accounts;
 }
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, minimalMode, onToggleMinimal }) {
   const [role, setRole] = useState("ev");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -1187,9 +1187,15 @@ function LoginScreen({ onLogin }) {
   return (
     <div className="g-login-wrap">
       <div className="g-login-brand">
-        <div className="g-brand-mark">
-          <Zap size={18} style={{ color: C.cyan }} />
-          <span>GRIDPULSE</span>
+        <div className="g-brand-mark-row">
+          <div className="g-brand-mark">
+            <Zap size={18} style={{ color: C.cyan }} />
+            <span>GRIDPULSE</span>
+          </div>
+          <button type="button" className="g-minimal-toggle" onClick={onToggleMinimal}>
+            {minimalMode ? <Sun size={14} /> : <Moon size={14} />}
+            {minimalMode ? "Premium" : "Minimal"}
+          </button>
         </div>
         <h1 className="g-login-headline">
           EV charging, tuned to the{" "}
@@ -1588,7 +1594,7 @@ function NotificationCenter({ notifications, onDismiss, onMarkRead }) {
 /* ---------------------------------------------------------------- */
 /*  Shared top bar                                                   */
 /* ---------------------------------------------------------------- */
-function TopBar({ name, role, onLogout, notifications, onDismissNotification, onMarkNotificationRead, onShowHelp, preferences }) {
+function TopBar({ name, role, onLogout, notifications, onDismissNotification, onMarkNotificationRead, onShowHelp, preferences, minimalMode, onToggleMinimal }) {
   return (
     <div className="g-topbar">
       <div className="g-brand-mark small">
@@ -1596,6 +1602,9 @@ function TopBar({ name, role, onLogout, notifications, onDismissNotification, on
         <span>GRIDPULSE</span>
       </div>
       <div className="g-topbar-right">
+        <button className="g-btn-ghost" onClick={onToggleMinimal} title={minimalMode ? "Switch to premium mode" : "Switch to minimal mode"}>
+          {minimalMode ? <Sun size={14} /> : <Moon size={14} />}
+        </button>
         <button className="g-btn-ghost" onClick={onShowHelp} title="Keyboard shortcuts (Ctrl+/)">
           <Info size={14} />
         </button>
@@ -4392,7 +4401,138 @@ const CHAT_QNA = [
     keywords: ["thank", "thanks", "cool", "great", "awesome", "nice"],
     answer: () => "Happy to help! Anything else you'd like to know about GRIDPULSE?",
   },
+  {
+    keywords: ["battery", "capacity", "degradation", "cycle", "health", "soh"],
+    answer: (role) => role === "driver"
+      ? "Battery health tracks capacity retention, charge cycles and projects future degradation so you know when to plan a service. Find it in the sidebar."
+      : "Battery insights summarises battery health across your fleet — SoC, capacity fade, and cycle counts. Check the Battery insights page.",
+  },
+  {
+    keywords: ["predict", "forecast", "insight", "trend", "future", "pattern"],
+    answer: () => "Predictive insights forecast range, cost, load and battery behaviour based on your historical patterns. Available on both driver and owner dashboards.",
+  },
+  {
+    keywords: ["theft", "stolen", "fraud", "anomaly", "suspicious"],
+    answer: () => "Energy theft detection uses ANPR camera reads cross-referenced with active sessions to flag anomalies. See the Theft detection page under Owner views.",
+  },
+  {
+    keywords: ["alert", "notification", "warning", "fault", "alarm"],
+    answer: () => "The Alerts page collects all active anomalies — charger faults, protocol disconnects, theft flags, and demand-response events — in one place.",
+  },
+  {
+    keywords: ["setting", "preference", "currency", "region", "config", "language"],
+    answer: () => "Settings lets you change currency, region, OCPP/ANPR connection endpoints, and other platform preferences.",
+  },
+  {
+    keywords: ["desktop", "electron", "install", "download", "app", "native"],
+    answer: () => "GRIDPULSE ships as a desktop Electron app for macOS and Windows — double-click install, no Node.js needed. It bundles the backend and UI together with auto-starting protocol simulators.",
+  },
+  {
+    keywords: ["deploy", "render", "host", "server", "production", "hosting"],
+    answer: () => "GRIDPULSE deploys as a single service on Render (or any Node host). The backend serves the built frontend. Set CORS_ORIGIN and INGEST_TOKEN as env vars.",
+  },
+  {
+    keywords: ["protocol", "gateway", "integration", "connect"],
+    answer: () => "GRIDPULSE's protocol gateway supports OCPP 1.6J/2.0.1, MODBUS, OpenADR 2.0b, ISO 15118 (Josev), VOLTTRON and ANPR — all in one backend. Check the Live gateway page for live feeds.",
+  },
+  {
+    keywords: ["energy", "solar", "grid", "load", "demand", "power", "consumption"],
+    answer: (role) => role === "driver"
+      ? "The Overview page shows your energy usage, CO2 avoided and estimated range. For solar-aware charging, try the Charge planner."
+      : "Grid & energy tracks load, solar and demand across sites in real time. The Charge planner page also shows demand-response signals.",
+  },
+  {
+    keywords: ["driver", "ev owner", "charge", "vehicle", "car"],
+    answer: () => "Driver features include: Overview, My Car/Garage, Charge Planner, Charging History, Battery Health, Find Chargers, Predictive Insights, Roadmap, and Settings.",
+  },
+  {
+    keywords: ["owner", "fleet", "operator", "manager"],
+    answer: () => "Owner features include: Fleet Overview, Live Gateway, Charging Operations, Grid & Energy, Battery Insights, Predictive Insights, Theft Detection, Alerts, Products, Roadmap, and Settings.",
+  },
+  {
+    keywords: ["who", "about", "what are you", "introduce"],
+    answer: () => "I'm Pulse, the GRIDPULSE in-app assistant. I can help with navigation, demo accounts, protocols (OCPP, MODBUS, OpenADR, ISO 15118, ANPR), the roadmap, and more.",
+  },
 ];
+
+/* ---- Interactive chat: page registry, nav detection, structured replies ---- */
+
+const CHAT_PAGES = {
+  driver: [
+    { key: "overview", label: "Overview", words: ["overview", "home", "dashboard", "stats", "energy"] },
+    { key: "garage",   label: "My car",    words: ["garage", "car", "vehicle", "insurance", "puc", "doc"] },
+    { key: "planner",  label: "Charge planner", words: ["planner", "charge planner", "schedule", "tariff", "plan"] },
+    { key: "history",  label: "Charging history", words: ["history", "sessions", "past", "charge log"] },
+    { key: "battery",  label: "Battery health", words: ["battery", "degradation", "capacity", "soh", "cycle"] },
+    { key: "chargers", label: "Find chargers",  words: ["chargers", "map", "nearby", "station", "stations", "find"] },
+    { key: "analytics",label: "Predictive insights", words: ["analytics", "predict", "insight", "forecast", "trend"] },
+    { key: "roadmap",  label: "Roadmap",  words: ["roadmap", "updates", "planned", "future", "release"] },
+    { key: "settings", label: "Settings", words: ["settings", "preferences", "region", "currency", "config"] },
+  ],
+  owner: [
+    { key: "overview", label: "Fleet overview", words: ["overview", "home", "dashboard", "fleet"] },
+    { key: "gateway",  label: "Live gateway",   words: ["gateway", "protocols", "ocpp", "modbus", "openadr", "feeds", "live", "telemetry"] },
+    { key: "charging", label: "Charging ops",   words: ["charging", "operations", "sessions", "connectors"] },
+    { key: "grid",     label: "Grid & energy",  words: ["grid", "energy", "load", "solar", "demand", "power"] },
+    { key: "battery",  label: "Battery insights", words: ["battery", "degradation", "fleet"] },
+    { key: "insights", label: "Predictive insights", words: ["predict", "insights", "forecast", "analytics", "scenario"] },
+    { key: "theft",    label: "Theft detection", words: ["theft", "anpr", "plate", "fraud", "suspicious"] },
+    { key: "alerts",   label: "Alerts",  words: ["alerts", "alarm", "warning", "fault", "anomaly"] },
+    { key: "products", label: "Products", words: ["products", "integrations", "suite"] },
+    { key: "roadmap",  label: "Roadmap",  words: ["roadmap", "updates", "planned", "future"] },
+    { key: "settings", label: "Settings", words: ["settings", "preferences", "connection", "ocpp", "config"] },
+  ],
+};
+
+const PAGE_CHIPS = {
+  chargers:  ["Charging cost near me?", "What is charger reliability?", "How is distance calculated?"],
+  battery:   ["How to slow degradation?", "What is capacity retention?", "Battery health tips"],
+  planner:   ["How does demand response work?", "Green vs fast charging?", "What affects charging cost?"],
+  gateway:   ["How does OCPP work?", "What is OpenADR?", "Live feed explained"],
+  theft:     ["How does theft detection work?", "What triggers an alert?", "ANPR accuracy?"],
+  alerts:    ["What triggers an alert?", "How to resolve an alert?", "See live gateway"],
+  overview:  ["Charge planner", "Find chargers", "Battery health"],
+  grid:      ["Solar tracking", "Demand response", "Energy theft"],
+  history:   ["Charge planner", "Find chargers", "View battery health"],
+  settings:  ["Demo accounts", "Roadmap", "About GRIDPULSE"],
+};
+
+const GENERIC_CHIPS = {
+  driver:  ["Demo accounts", "Charge planner", "Find chargers", "Battery health"],
+  owner:   ["Demo accounts", "OCPP gateway", "Theft detection", "Roadmap"],
+};
+
+function genericChips(role) {
+  return GENERIC_CHIPS[role] || GENERIC_CHIPS.driver;
+}
+
+function topicChips(role, pageKey) {
+  if (pageKey && PAGE_CHIPS[pageKey]) return PAGE_CHIPS[pageKey];
+  return genericChips(role);
+}
+
+/* Detect navigation intents like "open the theft page", "go to chargers", "show me alerts". */
+function detectNavCommand(text, role) {
+  const lower = (" " + text.toLowerCase()).replace(/[^a-z0-9\s]/g, " ");
+  const intents = ["open", "go to", "goto", "show me", "show the", "take me to", "navigate to",
+                   "launch", "jump to", "bring up", "open up", "switch to", "view the", "view"];
+  const hasIntent = intents.some(w => lower.includes(" " + w + " ") || lower.endsWith(" " + w));
+  if (!hasIntent) return null;
+  for (const p of CHAT_PAGES[role]) {
+    if (p.words.some(w => lower.includes(w))) return { key: p.key, label: p.label };
+  }
+  if (hasIntent) return undefined; // intent but unknown page
+  return null;
+}
+
+/* Attach action button + follow-up chips to any answer text. */
+function enrichAnswer(text, role, userLower) {
+  const pages = CHAT_PAGES[role] || [];
+  const match = pages.find(p => p.words.some(w => userLower.includes(w)));
+  const actions = match ? [{ label: `Open ${match.label}`, page: match.key }] : [];
+  const chips = topicChips(role, match?.key);
+  return { text, actions, chips };
+}
 
 const CHAT_STOPWORDS = new Set([
   "the", "a", "an", "is", "are", "was", "were", "how", "what", "when", "where",
@@ -4403,7 +4543,20 @@ const CHAT_STOPWORDS = new Set([
 ]);
 
 function chatReply(text, role) {
-  return smartChatReply(text, role);
+  const lower = text.toLowerCase();
+
+  /* 1. Navigation command — "open theft", "go to chargers", etc. */
+  const nav = detectNavCommand(text, role);
+  if (nav && typeof nav === "object") {
+    return { text: `Opening ${nav.label} for you.`, actions: [{ label: nav.label, page: nav.key }], goto: nav.key, chips: topicChips(role, nav.key) };
+  }
+  if (nav === undefined) {
+    return { text: "I don't have a page for that yet, but I can help you navigate the dashboards. Try: chargers, gateway, theft, battery, alerts, or settings.", chips: genericChips(role) };
+  }
+
+  /* 2. Normal Q&A scoring — wrap with actions + chips */
+  const answer = smartChatReply(text, role);
+  return enrichAnswer(answer, role, lower);
 }
 
 const CHAT_SYNONYMS = {
@@ -4497,6 +4650,54 @@ function smartChatReply(text, role) {
   return fallbackChatAnswer(text, role);
 }
 
+function fallbackChatAnswer(text, role) {
+  const lower = text.toLowerCase();
+  const suggestions = role === "driver"
+    ? ["charge planner", "demo accounts", "find chargers", "battery health"]
+    : ["OCPP gateway", "energy theft", "fleet overview", "demo accounts"];
+
+  if (lower.match(/\b(battery|capacity|degrad|cycle|health)\b/)) {
+    return role === "driver"
+      ? "Battery health shows capacity retention, charge cycles and projected degradation on the Battery Health page. Head there from the sidebar."
+      : "Battery insights summarises battery health across your fleet. Check the Battery insights page for capacity and cycle data.";
+  }
+  if (lower.match(/\b(theft|stolen|fraud|anpr|plate)\b/)) {
+    return "Energy theft detection uses ANPR camera reads cross-referenced with active sessions to flag anomalies. See the Theft detection page under Owner views.";
+  }
+  if (lower.match(/\b(alert|notif|warn|anomal)\b/)) {
+    return "The Alerts page collects all active anomalies — charger faults, protocol disconnects, theft flags, and demand-response events — in one place.";
+  }
+  if (lower.match(/\b(predict|forecast|insight|trend|future)\b/)) {
+    return "Predictive insights forecast range, cost, load and battery behaviour using your historical patterns. Available on both driver and owner dashboards.";
+  }
+  if (lower.match(/\b(setting|prefer|currency|region|config)\b/)) {
+    return "Settings lets you change currency, region, OCPP/ANPR connection endpoints, and other platform preferences.";
+  }
+  if (lower.match(/\b(roadmap|update|feature|release|phase|upcoming|q[1-4])\b/)) {
+    return "Check the Roadmap page — it lists all planned updates grouped by delivery phase. Features like Plug & Charge certificates and V2G integration are on the roadmap.";
+  }
+  if (lower.match(/\b(energy|solar|grid|load|demand|power)\b/)) {
+    return role === "driver"
+      ? "The Overview page shows your energy usage, CO2 avoided and estimated range. For solar-aware charging, try the Charge planner."
+      : "Grid & energy tracks load, solar and demand across sites in real time. The Charge planner page also shows demand-response signals.";
+  }
+  if (lower.match(/\b(station|charger|charge|connect|plug)\b/)) {
+    return "Find chargers shows nearby stations on a live map with price, availability and reliability. Charging operations monitors stations across your fleet.";
+  }
+  if (lower.match(/\b(cost|price|pay|bill|tariff|inr|usd|money)\b/)) {
+    return "GRIDPULSE converts tariffs between USD and INR live and highlights the most cost-effective charging windows on the smart charge planner.";
+  }
+  if (lower.match(/\b(wall|bye|quit|exit|close)\b/)) {
+    return "See you! I'm always here if you need help with GRIDPULSE.";
+  }
+  if (lower.match(/\b(who|what|about|about you)\b/)) {
+    return "I'm Pulse, the GRIDPULSE in-app assistant. I can help with navigation, demo accounts, protocols (OCPP, MODBUS, OpenADR, ISO 15118, ANPR), the roadmap, and more.";
+  }
+
+  const tag = role === "driver" ? "driver" : "fleet owner";
+  return `I'm not sure about that yet, but I'm always learning! Try asking about demo accounts, the charge planner, OCPP gateway, or the roadmap. As a ${tag}, you can also ask about any dashboard page.`;
+}
+
 function ChatbotAssistant({ role }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -4509,7 +4710,17 @@ function ChatbotAssistant({ role }) {
   const [aiModelInput, setAiModelInput] = useState(() => localStorage.getItem("gp_ai_model") || "");
   const [aiBaseInput, setAiBaseInput] = useState(() => localStorage.getItem("gp_ai_base") || "https://api.openai.com/v1");
   const [aiNote, setAiNote] = useState("");
+  const [prismOn, setPrismOn] = useState(false);
   const listRef = useRef(null);
+
+  const [sessionId] = useState(() => {
+    let sid = localStorage.getItem("gp_chat_session");
+    if (!sid) {
+      sid = `gridpulse-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem("gp_chat_session", sid);
+    }
+    return sid;
+  });
 
   useEffect(() => {
     if (open) {
@@ -4522,6 +4733,7 @@ function ChatbotAssistant({ role }) {
           } else {
             setAiMode("local");
           }
+          setPrismOn(!!cfg?.prism);
         })
         .catch(() => setAiMode("local"));
     }
@@ -4570,6 +4782,7 @@ function ChatbotAssistant({ role }) {
           apiKey: aiKey.trim() || undefined,
           baseURL: aiBaseInput.trim() || undefined,
           model: aiModelInput.trim() || undefined,
+          sessionId,
         }),
       });
       const data = await res.json();
@@ -4607,13 +4820,14 @@ function ChatbotAssistant({ role }) {
         <div className="g-chat">
           <div className="g-chat-head">
             <div className="g-chat-avatar"><Bot size={16} /></div>
-            <div className="g-chat-head-main">
-              <div className="g-chat-title">Pulse · Assistant</div>
-              <div className="g-chat-sub">
-                <span className={`g-chat-live ${aiMode === "ai" ? "g-chat-live-ai" : ""}`} />
-                {aiMode === "ai" ? `AI · ${aiModel || "connected"}` : "Offline knowledge"}
+<div className="g-chat-head-main">
+                <div className="g-chat-title">Pulse · Assistant</div>
+                <div className="g-chat-sub">
+                  <span className={`g-chat-live ${aiMode === "ai" ? "g-chat-live-ai" : ""}`} />
+                  {aiMode === "ai" ? `AI · ${aiModel || "connected"}` : "Offline knowledge"}
+                  {prismOn && <span className="g-chat-prism" title="PRISM tracing active">· PRISM</span>}
+                </div>
               </div>
-            </div>
             <button type="button" className="g-chat-gear" onClick={() => setAiConfigOpen((o) => !o)} title="AI settings">
               <Settings size={15} />
             </button>
@@ -7043,6 +7257,11 @@ function restoreSession() {
 /* ---------------------------------------------------------------- */
 export default function GridPulseApp() {
   const [session, setSession] = useState(() => restoreSession()); // { role, name, vehicle } | null
+  const [minimalMode, setMinimalMode] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const saved = localStorage.getItem("gp_theme_mode");
+    return saved === "minimal";
+  });
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [notifications, setNotifications] = useState([
     { id: 1, type: 'alert', message: 'Charger C-033 offline at Anna Nagar Hub', time: '2 min ago', read: false },
@@ -7052,6 +7271,15 @@ export default function GridPulseApp() {
   ]);
   const [preferences, setPreferences] = useState({ currency: 'INR', region: 'India' });
   const [showHelpModal, setShowHelpModal] = useState(false);
+
+  useEffect(() => {
+    applyTheme(minimalMode ? "minimal" : "default");
+    try {
+      localStorage.setItem("gp_theme_mode", minimalMode ? "minimal" : "default");
+    } catch {
+      /* storage unavailable */
+    }
+  }, [minimalMode]);
 
   /* Persist the session so a reload keeps you signed in (no bounce to login). */
   useEffect(() => {
@@ -7101,7 +7329,7 @@ export default function GridPulseApp() {
   }, []);
 
   return (
-    <div className="g-root">
+    <div className={`g-root ${minimalMode ? "g-root-minimal" : ""}`}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
         html, body, #root{
@@ -7115,6 +7343,36 @@ export default function GridPulseApp() {
           --body:'Inter',sans-serif;
           background:${C.bg}; color:${C.text}; font-family:var(--body);
           min-height:100vh; width:100%; position:relative; overflow-x:hidden;
+        }
+        .g-root.g-root-minimal{
+          background: ${C.bg};
+        }
+        .g-root.g-root-minimal .g-login-card,
+        .g-root.g-root-minimal .g-card,
+        .g-root.g-root-minimal .g-sidebar,
+        .g-root.g-root-minimal .g-topbar,
+        .g-root.g-root-minimal .g-notification-dropdown,
+        .g-root.g-root-minimal .g-modal,
+        .g-root.g-root-minimal .g-search-results {
+          backdrop-filter: blur(8px);
+          box-shadow: 0 8px 24px rgba(17, 17, 17, 0.06), 0 0 0 1px rgba(17, 17, 17, 0.04);
+        }
+        .g-root.g-root-minimal .g-login-card,
+        .g-root.g-root-minimal .g-card,
+        .g-root.g-root-minimal .g-sidebar,
+        .g-root.g-root-minimal .g-topbar,
+        .g-root.g-root-minimal .g-notification-dropdown,
+        .g-root.g-root-minimal .g-modal {
+          background: ${C.panelSolid};
+          border-color: ${C.border};
+        }
+        .g-root.g-root-minimal .g-login-wrap{
+          gap: 28px;
+          padding-top: 40px;
+          padding-bottom: 36px;
+        }
+        .g-root.g-root-minimal .g-login-card{
+          box-shadow: 0 16px 40px rgba(17, 17, 17, 0.08);
         }
         .g-root::before{
           content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
@@ -7132,21 +7390,40 @@ export default function GridPulseApp() {
         /* ---- brand mark ---- */
         .g-brand-mark{display:flex; align-items:center; gap:8px; font-family:var(--display); font-weight:600; font-size:18px; letter-spacing:-0.01em;}
         .g-brand-mark.small{font-size:15px;}
+        .g-brand-mark-row{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+        .g-minimal-toggle{
+          display:inline-flex; align-items:center; gap:8px; padding:7px 12px; border-radius:999px;
+          background:${C.cyanSoft}; border:1px solid ${C.border}; color:${C.text}; font-size:11px; font-family:var(--mono);
+          letter-spacing:0.06em; text-transform:uppercase; transition:border-color .15s ease, background .15s ease;
+        }
+        .g-minimal-toggle:hover{border-color:${C.cyan}; background:rgba(255,255,255,0.04);}
 
         /* ---- login ---- */
         .g-login-wrap{
           position:relative; z-index:1; min-height:100vh; display:flex; flex-wrap:wrap;
           align-items:center; gap:48px; padding:56px 7vw;
         }
-        .g-login-brand{flex:1 1 380px; max-width:480px;}
-        .g-login-headline{font-size:clamp(24px,3vw,34px); line-height:1.15; margin:24px 0 14px; letter-spacing:-0.01em;}
-        .g-login-sub{color:${C.textDim}; font-size:14.5px; line-height:1.6; max-width:420px;}
-        .g-login-loop{display:flex; flex-wrap:wrap; gap:6px; margin-top:28px; font-family:var(--mono); font-size:11px; color:${C.textDimmer};}
+        .g-login-brand{flex:1 1 380px; max-width:520px;}
+        .g-login-badge{
+          display:inline-flex; align-items:center; gap:8px; padding:7px 12px; margin-top:18px;
+          border-radius:999px; border:1px solid rgba(92, 220, 255, 0.35); background:rgba(92,220,255,0.08);
+          color:${C.cyan}; font-size:10.5px; font-family:var(--mono); letter-spacing:.1em; text-transform:uppercase;
+        }
+        .g-login-headline{font-size:clamp(26px,3vw,38px); line-height:1.08; margin:20px 0 14px; letter-spacing:-0.03em; max-width:540px;}
+        .g-login-sub{color:${C.textDim}; font-size:15px; line-height:1.7; max-width:480px;}
+        .g-login-metrics{display:flex; flex-wrap:wrap; gap:12px; margin:20px 0 18px;}
+        .g-login-metric{
+          min-width:120px; padding:10px 12px; border:1px solid ${C.border}; border-radius:12px;
+          background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+        }
+        .g-login-metric strong{display:block; font-size:18px; color:${C.text}; font-family:var(--display); letter-spacing:-0.04em;}
+        .g-login-metric span{display:block; margin-top:3px; font-size:11px; color:${C.textDimmer}; font-family:var(--mono);}
+        .g-login-loop{display:flex; flex-wrap:wrap; gap:6px; margin-top:18px; font-family:var(--mono); font-size:11px; color:${C.textDimmer};}
         .g-loop-item{display:flex; align-items:center; gap:6px;}
 
         /* ---- gravitas-inspired polish (professional) ---- */
         .g-grad-text{
-          background:linear-gradient(100deg, ${C.cyan} 0%, #9df1ff 45%, ${C.amber} 100%);
+          display:inline-block; margin-left:8px; background:linear-gradient(100deg, ${C.cyan} 0%, #9df1ff 45%, ${C.amber} 100%);
           -webkit-background-clip:text; background-clip:text; color:transparent;
         }
         .g-window{display:inline-block; animation:g-wind .55s cubic-bezier(.22,1,.36,1);}
@@ -7196,28 +7473,32 @@ export default function GridPulseApp() {
         .g-eyebrow::before{content:''; width:22px; height:1px; background:${C.cyan}; opacity:.5;}
 
         .g-login-card{
-          flex:1 1 360px; max-width:420px; background:${C.panel}; border:1px solid ${C.border};
-          border-radius:18px; backdrop-filter:blur(16px); padding:28px; position:relative; z-index:1;
+          flex:1 1 360px; max-width:430px; background:linear-gradient(180deg, rgba(17,26,36,0.9), rgba(10,15,22,0.97));
+          border:1px solid ${C.border}; box-shadow:0 24px 60px rgba(0,0,0,0.32), 0 0 0 1px rgba(92,220,255,0.06);
+          border-radius:22px; backdrop-filter:blur(18px); padding:28px; position:relative; z-index:1;
         }
-        .g-role-toggle{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px;}
+        .g-login-card::before{content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+          background:radial-gradient(circle at top left, rgba(92,220,255,0.12), transparent 38%);}
+        .g-role-toggle{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px; position:relative; z-index:1;}
         .g-role-btn{
-          display:flex; align-items:center; gap:10px; text-align:left; padding:12px;
-          border-radius:12px; border:1px solid ${C.border}; background:rgba(255,255,255,0.02); color:${C.text};
-          transition:border-color .2s ease, background .2s ease;
+          display:flex; align-items:center; gap:10px; text-align:left; padding:12px; border-radius:12px; border:1px solid ${C.border};
+          background:rgba(255,255,255,0.02); color:${C.text}; transition:border-color .2s ease, background .2s ease, transform .2s ease;
         }
-        .g-role-btn.active{border-color:${C.cyan}; background:${C.cyanSoft};}
+        .g-role-btn:hover{transform:translateY(-1px); border-color:${C.cyan};}
+        .g-role-btn.active{border-color:${C.cyan}; background:${C.cyanSoft}; box-shadow:inset 0 0 0 1px rgba(92,220,255,0.12);}
         .g-role-title{font-size:13px; font-weight:600;}
         .g-role-sub{font-size:11px; color:${C.textDimmer};}
 
-        .g-tab-row{display:flex; gap:4px; border-bottom:1px solid ${C.borderSoft}; margin-bottom:18px;}
+        .g-tab-row{display:flex; gap:4px; border-bottom:1px solid ${C.borderSoft}; margin-bottom:18px; position:relative; z-index:1;}
         .g-tab{flex:1; padding:9px; background:none; border:none; color:${C.textDimmer}; font-size:13px; border-bottom:2px solid transparent;}
         .g-tab.active{color:${C.text}; border-color:${C.cyan};}
 
-        .g-form{display:flex; flex-direction:column; gap:12px;}
+        .g-form{display:flex; flex-direction:column; gap:12px; position:relative; z-index:1;}
         .g-field{
-          display:flex; align-items:center; gap:10px; border:1px solid ${C.border}; border-radius:10px;
-          padding:10px 12px; background:rgba(255,255,255,0.02);
+          display:flex; align-items:center; gap:10px; border:1px solid ${C.border}; border-radius:12px;
+          padding:11px 12px; background:rgba(255,255,255,0.02); transition:border-color .2s ease, box-shadow .2s ease;
         }
+        .g-field:focus-within{border-color:${C.cyan}; box-shadow:0 0 0 3px rgba(92,220,255,0.08);}
         .g-field input{background:none; border:none; outline:none; color:${C.text}; font-size:13.5px; width:100%;}
         .g-field input::placeholder{color:${C.textDimmer};}
         .g-field-action{display:flex; align-items:center; justify-content:center; flex-shrink:0; padding:4px; border:0; background:none; color:${C.textDimmer}; border-radius:6px;}
@@ -8268,6 +8549,10 @@ export default function GridPulseApp() {
         .g-chat-sub{display:flex; align-items:center; gap:5px; font-size:11px; color:${C.textDim};}
         .g-chat-live{width:7px; height:7px; border-radius:50%; background:${C.green}; box-shadow:0 0 8px ${C.green};}
         .g-chat-live-ai{background:${C.cyan}; box-shadow:0 0 8px ${C.cyan};}
+        .g-chat-prism{
+          font-size:10px; letter-spacing:.05em; text-transform:uppercase; padding:1px 6px; border-radius:6px;
+          background:rgba(255,255,255,0.06); border:1px solid ${C.border}; color:${C.textDim};
+        }
         .g-chat-gear{
           background:none; border:none; color:${C.textDimmer}; padding:6px; border-radius:8px;
           display:flex; transition:background .15s ease, color .15s ease;
@@ -8336,7 +8621,11 @@ export default function GridPulseApp() {
       `}</style>
 
       {!session ? (
-        <LoginScreen onLogin={setSession} />
+        <LoginScreen
+          onLogin={setSession}
+          minimalMode={minimalMode}
+          onToggleMinimal={() => setMinimalMode((prev) => !prev)}
+        />
       ) : (
         <>
           <TopBar 
@@ -8348,6 +8637,8 @@ export default function GridPulseApp() {
             onMarkNotificationRead={handleMarkNotificationRead}
             onShowHelp={() => setShowHelpModal(true)}
             preferences={preferences}
+            minimalMode={minimalMode}
+            onToggleMinimal={() => setMinimalMode((prev) => !prev)}
           />
           {session.role === "ev"
             ? <DriverDashboard name={session.name} preferences={preferences} setPreferences={setPreferences} vehicleProfile={session.vehicle} />
