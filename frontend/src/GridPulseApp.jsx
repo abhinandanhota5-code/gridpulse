@@ -3448,6 +3448,25 @@ function DriverChargePlannerPage({ preferences }) {
 
   const alreadyThere = plan.energyNeeded <= 0;
 
+  const billEstimator = useMemo(() => {
+    const sessionEnergy = Math.max(plan.energyNeeded, 0);
+    const projectedSessionBill = Math.max(plan.cost || 0, 0);
+    const peakRate = plan.ratePerKwh || 0;
+    const offPeakRate = peakRate * 0.75;
+    const shareOffPeak = plan.timeNeededHours > 0 && plan.offPeakHours > 0
+      ? Math.min(100, Math.max(0, (plan.offPeakHours / plan.timeNeededHours) * 100))
+      : 0;
+    const monthlyEquivalent = projectedSessionBill * 30;
+    return {
+      sessionEnergy,
+      projectedSessionBill,
+      peakRate,
+      offPeakRate,
+      shareOffPeak,
+      monthlyEquivalent,
+    };
+  }, [plan]);
+
   const quickSchedules = [
     { label: "Morning commute (8 AM)", time: "08:00", target: 80 },
     { label: "Work day (9 AM)", time: "09:00", target: 90 },
@@ -3667,6 +3686,38 @@ function DriverChargePlannerPage({ preferences }) {
                     <span className="g-cost-value g-mono" style={{ color: C.green }}>−{formatCurrency(plan.offPeakSavings, preferences.currency, preferences.region)}</span>
                   </div>
                 )}
+              </div>
+
+              <div className="g-bill-estimator">
+                <div className="g-bill-estimator-header">
+                  <div>
+                    <div className="g-bill-estimator-label">Bill estimator</div>
+                    <div className="g-bill-estimator-total">{formatCurrency(billEstimator.projectedSessionBill, preferences.currency, preferences.region)}</div>
+                  </div>
+                  <span className="g-bill-estimator-badge">Projected session</span>
+                </div>
+                <div className="g-bill-estimator-grid">
+                  <div className="g-bill-estimator-stat">
+                    <span className="g-bill-label">Energy</span>
+                    <strong>{billEstimator.sessionEnergy.toFixed(1)} kWh</strong>
+                  </div>
+                  <div className="g-bill-estimator-stat">
+                    <span className="g-bill-label">Rate</span>
+                    <strong>{formatCurrency(billEstimator.peakRate, preferences.currency, preferences.region)}/kWh</strong>
+                  </div>
+                  <div className="g-bill-estimator-stat">
+                    <span className="g-bill-label">Off-peak</span>
+                    <strong>{formatCurrency(billEstimator.offPeakRate, preferences.currency, preferences.region)}/kWh</strong>
+                  </div>
+                  <div className="g-bill-estimator-stat">
+                    <span className="g-bill-label">Monthly</span>
+                    <strong>{formatCurrency(billEstimator.monthlyEquivalent, preferences.currency, preferences.region)}</strong>
+                  </div>
+                </div>
+                <div className="g-bill-estimator-footer">
+                  <span>Optimal charging window: <strong>{plan.offPeakHours > 0 ? `${plan.offPeakHours.toFixed(1)}h` : "Standard rate"}</strong></span>
+                  <span>{billEstimator.shareOffPeak > 0 ? `${billEstimator.shareOffPeak.toFixed(0)}% off-peak` : "Peak priced"}</span>
+                </div>
               </div>
 
               <div className="g-smart-charge" style={{ marginTop: 14 }}>
@@ -7762,8 +7813,19 @@ export default function GridPulseApp() {
         .g-cost-row{display:flex; justify-content:space-between; align-items:center;}
         .g-cost-label{font-size:12px; color:${C.textDim};}
         .g-cost-value{font-size:13px; color:${C.text}; font-family:var(--mono);}
+        .g-bill-estimator{display:flex; flex-direction:column; gap:14px; margin-top:16px; padding:14px 16px; border:1px solid ${C.border}; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));}
+        .g-bill-estimator-header{display:flex; align-items:flex-start; justify-content:space-between; gap:12px;}
+        .g-bill-estimator-label{font-size:10.5px; color:${C.textDim}; letter-spacing:0.12em; text-transform:uppercase; font-family:var(--mono);}
+        .g-bill-estimator-total{font-size:26px; font-weight:700; letter-spacing:-0.03em; color:${C.text}; font-family:var(--display);}
+        .g-bill-estimator-badge{display:inline-flex; align-items:center; justify-content:center; padding:5px 9px; border-radius:999px; border:1px solid ${C.border}; background:${C.cyanSoft}; color:${C.text}; font-size:10.5px; font-family:var(--mono); letter-spacing:0.06em; text-transform:uppercase;}
+        .g-bill-estimator-grid{display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px;}
+        .g-bill-estimator-stat{display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:10px; border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.015);}
+        .g-bill-estimator-stat .g-bill-label{font-size:10.5px; color:${C.textDim}; letter-spacing:0.08em; text-transform:uppercase; font-family:var(--mono);}
+        .g-bill-estimator-stat strong{font-size:15px; color:${C.text}; font-family:var(--mono); font-weight:600;}
+        .g-bill-estimator-footer{display:flex; justify-content:space-between; align-items:center; gap:12px; padding-top:2px; font-size:12px; color:${C.textDim};}
+        .g-bill-estimator-footer strong{color:${C.green};}
+        @media(max-width:640px){ .g-smart-charge-grid{grid-template-columns:1fr;} .g-bill-estimator-grid{grid-template-columns:repeat(2, minmax(0, 1fr));} }
         .g-smart-charge-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px;}
-        @media(max-width:640px){ .g-smart-charge-grid{grid-template-columns:1fr;} }
         .g-smart-chip{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border:1px solid ${C.border}; border-radius:10px; background:rgba(255,255,255,0.02);}
         .g-smart-chip-l{font-size:12px; color:${C.text};}
 
