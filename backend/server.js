@@ -52,7 +52,12 @@ function requireIngestToken(req, res, next) {
 
 /* ---- core API ---- */
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", service: "gridpulse-backend", time: new Date().toISOString() });
+  res.json({
+    status: "ok",
+    service: "gridpulse-backend",
+    time: new Date().toISOString(),
+    prism: chat.prismEnabled(),
+  });
 });
 
 app.get("/api/live", (_req, res) => {
@@ -102,6 +107,8 @@ app.get("/api/chat/config", (_req, res) => {
   res.json({
     ai: chat.configured(),
     model: chat.effectiveModel(),
+    prism: chat.prismEnabled(),
+    prismHost: chat.prismHost(),
     note: chat.configured()
       ? "AI assistant connected via server config."
       : "No AI provider key set — chat runs in offline knowledge mode. Add a key in the assistant settings or set GRIDPULSE_AI_API_KEY."
@@ -109,10 +116,11 @@ app.get("/api/chat/config", (_req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { message, history, apiKey, baseURL, model } = req.body || {};
+  const { message, history, apiKey, baseURL, model, sessionId } = req.body || {};
   const text = String(message || "").trim();
   if (!text) return res.status(400).json({ error: "message required", mode: "local" });
-  res.json(await chat.ask({ message: text, history, apiKey, baseURL, model }));
+  const session = String(sessionId || "").trim().slice(0, 128) || undefined;
+  res.json(await chat.ask({ message: text, history, apiKey, baseURL, model, sessionId: session }));
 });
 
 /* ---- edge-agent ingest bridges (Josev V2G + VOLTTRON) ---- */
