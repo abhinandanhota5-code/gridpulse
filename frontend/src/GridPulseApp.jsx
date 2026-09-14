@@ -263,6 +263,7 @@ function useGeolocation() {
           lng: pos.coords.longitude,
           accuracy: Math.round(pos.coords.accuracy) || null,
           at: Date.now(),
+          source: "gps",
         });
         setError("");
         setState("granted");
@@ -271,16 +272,34 @@ function useGeolocation() {
         if (err.code === err.PERMISSION_DENIED) {
           setState("denied");
           setError("Location access was blocked. Allow it for this site in the macOS/System prompt, then retry.");
-        } else if (err.code === err.POSITION_UNAVAILABLE) {
-          setState("error");
-          setError("Couldn't get a location fix — check that Wi-Fi is on, or retry in a moment.");
-        } else {
-          setState("error");
-          setError("Timed out getting a GPS fix. If a location prompt appeared, allow it and hit retry.");
+          return;
         }
+        /* Timeout or no fix: CoreLocation on the desktop shell often can't
+           deliver a position. Fall back to a coarse IP-based location so the
+           map and charger sorting still work instead of sitting empty. */
+        api.getGeoIp()
+          .then((g) => {
+            if (g && Number.isFinite(g.lat) && Number.isFinite(g.lng)) {
+              setLoc({ lat: g.lat, lng: g.lng, accuracy: null, at: Date.now(), source: "ip" });
+              setError("");
+              setState("granted");
+            } else {
+              throw new Error((g && g.error) || "no coordinates");
+            }
+          })
+          .catch(() => {
+            if (err.code === err.POSITION_UNAVAILABLE) {
+              setState("error");
+              setError("Couldn't get a location fix — check that Wi-Fi is on, or retry in a moment.");
+            } else {
+              setState("error");
+              setError("Timed out getting a GPS fix. If a location prompt appeared, allow it and hit retry.");
+            }
+          });
       },
-      /* 45s so users can approve the macOS permission prompt in time. */
-      { enableHighAccuracy: false, timeout: 45000, maximumAge: 60000 }
+      /* 20s so users can approve the macOS permission prompt in time; the
+         IP fallback below covers the case where the OS never delivers. */
+      { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 }
     );
   }, []);
 

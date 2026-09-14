@@ -21,6 +21,7 @@ const { registerOpenAdr } = require("./openadr");
 const { buildDriverData, buildOwnerData } = require("./merge");
 const fx = require("./fx");
 const { fetchWeather } = require("./weather");
+const { fetchGeoIp } = require("./geoip");
 const { geocode } = require("./geocode");
 const { fetchRoute } = require("./osrm");
 const chat = require("./chat");
@@ -131,6 +132,13 @@ app.get("/api/geocode", async (req, res) => {
   const q = String(req.query.q || "").trim();
   if (!q) return res.status(400).json({ error: "q (place query) is required" });
   res.json(await geocode(q));
+});
+
+/* Coarse location from the caller's IP (ipwho.is proxy, cached). The desktop
+   shell falls back to this when the OS GPS fix times out, so the map and
+   charger sorting still get an approximate position. */
+app.get("/api/geoip", async (_req, res) => {
+  res.json(await fetchGeoIp());
 });
 
 /* Road route between two coordinates (OSRM proxy, cached). Returns

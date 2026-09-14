@@ -29,6 +29,7 @@ export const api = {
   getLive: () => request("/api/live"),
   getFx: () => request("/api/fx"),
   getWeather: (lat, lon) => request(`/api/weather?lat=${lat}&lon=${lon}`),
+  getGeoIp: () => request("/api/geoip"),
   geocode: (q) => request(`/api/geocode?q=${encodeURIComponent(q)}`),
   getRoute: (fromLat, fromLng, toLat, toLng) =>
     request(`/api/route?from=${fromLat},${fromLng}&to=${toLat},${toLng}`),

@@ -4,7 +4,7 @@
 /*  and the built web UI, so a non-technical user just double-clicks    */
 /*  the app. No Node.js install required — Electron ships its own.      */
 /* ------------------------------------------------------------------ */
-const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
@@ -350,7 +350,17 @@ if (!gotLock) {
   });
 }
 
-app.whenReady().then(async () => { buildMenu(); await createWindows(); });
+app.whenReady().then(async () => {
+  // Geolocation needs explicit permission handlers in Electron: without them
+  // Chromium on macOS never surfaces the OS location prompt, so every
+  // getCurrentPosition call hangs until it times out.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(permission === "geolocation");
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "geolocation");
+  buildMenu();
+  await createWindows();
+});
 
 // Kick off a background auto-update check once the backend is healthy.
 setTimeout(() => {
