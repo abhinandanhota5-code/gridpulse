@@ -99,6 +99,13 @@ jobs:
             export CSC_LINK="$CSC_LINK_RAW"
             export CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD_RAW"
             export CSC_IDENTITY_AUTO_DISCOVERY=true
+            # Flip notarize + hardenedRuntime on when a real signing identity is present.
+            node -e "
+              const fs=require('fs'), p='package.json';
+              const cfg=JSON.parse(fs.readFileSync(p,'utf8'));
+              if(cfg.build&&cfg.build.mac){cfg.build.mac.notarize=true; cfg.build.mac.hardenedRuntime=true;}
+              fs.writeFileSync(p,JSON.stringify(cfg,null,2)+'\n');
+            "
           fi
           if [ -n "$APPLE_ID_RAW" ]; then
             export APPLE_ID="$APPLE_ID_RAW"

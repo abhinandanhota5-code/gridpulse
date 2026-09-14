@@ -1,6 +1,6 @@
 {
   "name": "gridpulse-desktop",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "GRIDPULSE Desktop — EV charging dashboards for driver and fleet owner. Ships its own runtime; nothing to install.",
   "main": "main.cjs",
   "license": "Apache-2.0",
@@ -46,11 +46,11 @@
     "mac": {
       "category": "public.app-category.utilities",
       "icon": "assets/icon.png",
-      "hardenedRuntime": true,
+      "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist",
-      "notarize": true,
+      "notarize": false,
       "extendInfo": {
         "NSLocationWhenInUseUsageDescription": "GRIDPULSE uses your location to show nearby EV chargers, sort them by road distance, and pull live weather at your position for range and charging estimates.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "GRIDPULSE uses your location to show nearby EV chargers, sort them by road distance, and pull live weather at your position for range and charging estimates."
