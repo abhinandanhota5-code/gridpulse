@@ -87,6 +87,10 @@ async function ensureServer() {
   process.env.PORT = String(port);
   process.env.GRIDPULSE_DIST = WEB_DIR;
   process.env.GRIDPULSE_EGRESS = `ws://127.0.0.1:${port}`;
+  // The shell spawns its own simulator set in spawnSims(); stop the backend
+  // from spawning a second set (duplicate OCPP station IDs fight over the
+  // CSMS connection and cause endless connect/disconnect churn).
+  process.env.DEMO_SIMS = process.env.DEMO_SIMS || "0";
   console.log(`[desktop] starting bundled GRIDPULSE backend on port ${port}...`);
   try {
     require(path.join(RES, "backend", "server.js"));
@@ -330,6 +334,21 @@ ipcMain.handle("open-app-folder", () => shell.openPath(path.dirname(app.getAppPa
 ipcMain.handle("get-port", () => port);
 ipcMain.handle("check-for-updates", () => checkForUpdates(true));
 ipcMain.handle("get-update-status", () => updateEvent);
+
+/* Only one GRIDPULSE may run at a time: a second launch (e.g. double-clicking
+   the app in several mounted DMGs) used to race for ports and crash with
+   uncaught EADDRINUSE errors. Now the second launch just focuses the first. */
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
 
 app.whenReady().then(async () => { buildMenu(); await createWindows(); });
 

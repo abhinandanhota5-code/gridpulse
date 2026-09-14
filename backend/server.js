@@ -266,11 +266,21 @@ app.use((req, res) => {
 });
 
 const httpServer = http.createServer(app);
+httpServer.on("error", (err) => {
+  /* Without this handler, EADDRINUSE (e.g. another instance already bound
+     the port) surfaces as an uncaught exception — inside the Electron main
+     process that pops a "JavaScript error in the main process" dialog.
+     Log and stay up instead: the desktop shell notices the missing health
+     endpoint and shows its "failed to start" guidance page. */
+  console.error(`GRIDPULSE backend could not bind port ${PORT}: ${err.code || err.message}`);
+});
 attachOcpp(httpServer).then(() => {
   httpServer.listen(PORT, () => {
     console.log(`GRIDPULSE backend listening on port ${PORT}`);
     startDemoSims(PORT);
   });
+}).catch((err) => {
+  console.error("GRIDPULSE backend failed to attach OCPP gateway:", err);
 });
 
 /* ---- Pulse AI: provision local Ollama in the background on boot,
