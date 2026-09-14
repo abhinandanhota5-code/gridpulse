@@ -99,11 +99,17 @@ jobs:
             export CSC_LINK="$CSC_LINK_RAW"
             export CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD_RAW"
             export CSC_IDENTITY_AUTO_DISCOVERY=true
-            # Flip notarize + hardenedRuntime on when a real signing identity is present.
+            # Flip to real signing + notarization when certs are present.
             node -e "
               const fs=require('fs'), p='package.json';
               const cfg=JSON.parse(fs.readFileSync(p,'utf8'));
-              if(cfg.build&&cfg.build.mac){cfg.build.mac.notarize=true; cfg.build.mac.hardenedRuntime=true;}
+              if(cfg.build&&cfg.build.mac){
+                delete cfg.build.mac.identity;
+                cfg.build.mac.hardenedRuntime=true;
+                cfg.build.mac.notarize=true;
+                cfg.build.mac.entitlements='assets/entitlements.mac.plist';
+                cfg.build.mac.entitlementsInherit='assets/entitlements.mac.plist';
+              }
               fs.writeFileSync(p,JSON.stringify(cfg,null,2)+'\n');
             "
           fi
