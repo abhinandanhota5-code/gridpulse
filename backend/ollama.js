@@ -420,6 +420,11 @@ async function ensure() {
     S.message = "Pulse AI uses the cloud/disabled provider — local auto-setup not active.";
     return S;
   }
+  if (process.platform !== "darwin" && !findBin() && !appPresent()) {
+    S.phase = "unsupported";
+    S.message = "Local Pulse AI connects on macOS or via an installed Ollama. Install Ollama (https://ollama.com) and GRIDPULSE reconnects automatically.";
+    return S;
+  }
   if (busy) return S;
   busy = true;
   S.error = null;

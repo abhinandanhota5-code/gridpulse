@@ -1,5 +1,15 @@
-const { test } = require("node:test");
+const { test, before } = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("node:os");
+const fs = require("node:fs");
+const path = require("node:path");
+
+before(() => {
+  // Hermetic: never touch the host machine's real Ollama / persisted state.
+  process.env.GRIDPULSE_AI_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "gridpulse-ai-chat-"));
+  process.env.GRIDPULSE_AI_BOOTSTRAP = "0";
+  process.env.OLLAMA_HOST = "http://127.0.0.1:9"; // unroutable port
+});
 
 test("provider defaults to local ollama with llama3:latest", () => {
   delete process.env.GRIDPULSE_AI_PROVIDER;

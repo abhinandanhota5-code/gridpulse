@@ -1,6 +1,10 @@
 /* Load backend/.env first so module-level config (chat.js PRISM vars,
-   CORS, MODBUS, ports, tokens) is set before anything reads it. */
-require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+   CORS, MODBUS, ports, tokens) is set before anything reads it.
+   dotenv is optional at runtime: packaged installers bundle a copy, and a
+   missing .env (or missing package) must never prevent the backend boot. */
+try {
+  require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+} catch (_) { /* dotenv/.env absent — run with process env only */ }
 
 const express = require("express");
 const cors = require("cors");
