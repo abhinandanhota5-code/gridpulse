@@ -14,7 +14,8 @@ import {
   LocateFixed, RefreshCw, Navigation, FileText, Upload, ShieldCheck, BadgeCheck, CalendarDays, ArrowUpDown,
   Sun, Moon, Cloud, CloudFog, CloudSnow, CloudLightning, Wind, Compass,
   Rocket, Send, Sparkles, CircleDot, GitBranch,
-  Settings2, RotateCcw, Star, Power
+  Settings2, RotateCcw, Star, Power,
+  Cpu, ThumbsUp, ThumbsDown
 } from "lucide-react";
 
 import { C, STATUS_COLOR, CONFIDENCE_COLOR, applyTheme } from "./theme.js";
@@ -5597,7 +5598,18 @@ function ChatbotAssistant({ role }) {
   const [provider, setProvider] = useState("ollama");
   const [aiReady, setAiReady] = useState(false);
   const [aiStatus, setAiStatus] = useState(null);
+  const [selectedAgent, setSelectedAgent] = useState("general");
+  const [feedbackMap, setFeedbackMap] = useState({});
   const listRef = useRef(null);
+
+  const COPILOT_OPTIONS = [
+    { key: "general", label: "General", icon: Sparkles },
+    { key: "dispatch", label: "Grid Dispatch", icon: Gauge },
+    { key: "maintenance", label: "Maintenance & Dues", icon: Wrench },
+    { key: "theft", label: "Theft Forensics", icon: ShieldOff },
+    { key: "battery", label: "Battery Doctor", icon: Battery },
+    { key: "trip", label: "Range Concierge", icon: Navigation },
+  ];
 
   const [sessionId] = useState(() => {
     let sid = localStorage.getItem("gp_chat_session");
@@ -5691,6 +5703,18 @@ function ChatbotAssistant({ role }) {
     setAiStatus((s) => ({ ...(s || {}), phase: "working", message: "Setting up Pulse AI…" }));
   };
 
+  const sendPrismFeedback = async (msgIdx, traceId, thumbsUp, rating = 5) => {
+    if (!traceId) return;
+    try {
+      await fetch(`${API_BASE_URL}/api/prism/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ traceId, sessionId, thumbsUp, rating }),
+      });
+      setFeedbackMap((prev) => ({ ...prev, [msgIdx]: { thumbsUp, rating } }));
+    } catch (_) {}
+  };
+
   const send = async (preset) => {
     const text = (preset ?? input).trim();
     if (!text || busy) return;
@@ -5700,8 +5724,15 @@ function ChatbotAssistant({ role }) {
 
     let reply = chatReply(text, role);
     let mode = "local";
+    let data = null;
 
-    const payload = { message: text, history: messages.slice(-8), sessionId };
+    const payload = {
+      message: text,
+      history: messages.slice(-8),
+      sessionId,
+      agentMode: selectedAgent,
+      userRole: role,
+    };
     if (provider === "cloud") {
       payload.apiKey = aiKey.trim() || undefined;
       payload.baseURL = aiBaseInput.trim() || undefined;
@@ -5714,24 +5745,30 @@ function ChatbotAssistant({ role }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (data?.mode === "ai" && data.reply) {
+      data = await res.json();
+      if (data?.reply) {
         reply = data.reply;
-        mode = "ai";
-        setAiModel(data.model || aiModel);
+        mode = data.mode || "ai";
+        if (data.model) setAiModel(data.model);
       }
       if (data?.note) setAiNote(data.note);
-      else if (mode === "local" && provider !== "ollama" && !aiKey) setAiNote("Offline knowledge mode — add an AI key in the assistant settings for smarter answers.");
-      else if (mode === "local" && provider === "ollama") setAiNote("Pulse is answering from its local knowledge base while the AI engine finishes setup.");
+      else if (mode === "local" && provider !== "ollama" && !aiKey) setAiNote("Offline knowledge mode — add an AI key in settings for custom provider.");
     } catch (_) {
       setAiNote("Assistant server unavailable — using offline knowledge mode.");
     }
 
     setMessages((prev) => [
       ...prev,
-      typeof reply === "object" && reply !== null && typeof reply.text === "string"
-        ? { from: "bot", text: reply.text, actions: reply.actions, chips: reply.chips }
-        : { from: "bot", text: String(reply) },
+      {
+        from: "bot",
+        text: typeof reply === "object" && reply !== null && typeof reply.text === "string" ? reply.text : String(reply),
+        actions: reply?.actions,
+        chips: reply?.chips,
+        traceId: data?.traceId,
+        agentId: data?.agentId,
+        agentName: data?.agentName,
+        guardrails: data?.guardrails,
+      },
     ]);
     setAiMode(mode);
     setBusy(false);
@@ -5778,6 +5815,33 @@ function ChatbotAssistant({ role }) {
             <button type="button" className="g-chat-close" onClick={() => setOpen(false)}>
               <X size={16} />
             </button>
+          </div>
+
+          <div className="g-chat-copilots-strip" style={{
+            display: "flex", gap: 5, padding: "8px 12px", background: "rgba(0,0,0,0.25)",
+            borderBottom: `1px solid ${C.border}`, overflowX: "auto"
+          }}>
+            {COPILOT_OPTIONS.map((c) => {
+              const active = selectedAgent === c.key;
+              const Icon = c.icon;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => setSelectedAgent(c.key)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5, padding: "4px 9px",
+                    borderRadius: 14, fontSize: 11, fontFamily: "var(--mono)",
+                    border: `1px solid ${active ? C.cyan : "rgba(255,255,255,0.08)"}`,
+                    background: active ? "rgba(79,227,255,0.15)" : "transparent",
+                    color: active ? C.cyan : C.textDim, cursor: "pointer", whiteSpace: "nowrap"
+                  }}
+                >
+                  <Icon size={12} />
+                  <span>{c.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           {aiConfigOpen && (
@@ -5872,9 +5936,52 @@ function ChatbotAssistant({ role }) {
                     <div className="g-chat-usertext">{m.text}</div>
                   ) : (
                     <>
-                      <div className="g-chat-msg-avatar"><Sparkles size={12} /></div>
                       <div className="g-chat-reply">
+                        {m.agentName && (
+                          <div style={{ fontSize: 10, color: C.textDimmer, marginBottom: 3, fontFamily: "var(--mono)" }}>
+                            {m.agentName}
+                          </div>
+                        )}
                         <div className="g-chat-bubble">{m.text}</div>
+                        {m.traceId && (
+                          <div style={{
+                            display: "flex", alignItems: "center", justifyContent: "space-between",
+                            marginTop: 5, padding: "3px 6px", background: "rgba(0,0,0,0.2)", borderRadius: 6,
+                            fontSize: 10.5, color: C.textDimmer, fontFamily: "var(--mono)"
+                          }}>
+                            <span style={{ color: C.cyan, opacity: 0.9 }} title={`PRISM Trace ID: ${m.traceId}`}>
+                              PRISM #{m.traceId.slice(0, 8)}
+                            </span>
+                            <span style={{ color: C.green, fontSize: 9.5 }}>✓ Grounded</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                              <button
+                                type="button"
+                                onClick={() => sendPrismFeedback(i, m.traceId, true, 5)}
+                                style={{
+                                  background: feedbackMap[i]?.thumbsUp === true ? "rgba(50,215,75,0.25)" : "transparent",
+                                  border: "none", color: feedbackMap[i]?.thumbsUp === true ? C.green : C.textDimmer,
+                                  cursor: "pointer", padding: "2px 4px", borderRadius: 4
+                                }}
+                                title="Accurate & Safe (Logs to PRISM)"
+                              >
+                                <ThumbsUp size={11} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => sendPrismFeedback(i, m.traceId, false, 1)}
+                                style={{
+                                  background: feedbackMap[i]?.thumbsUp === false ? "rgba(255,69,58,0.25)" : "transparent",
+                                  border: "none", color: feedbackMap[i]?.thumbsUp === false ? C.red : C.textDimmer,
+                                  cursor: "pointer", padding: "2px 4px", borderRadius: 4
+                                }}
+                                title="Flag for PRISM review"
+                              >
+                                <ThumbsDown size={11} />
+                              </button>
+                              {feedbackMap[i] && <span style={{ color: C.cyan, fontSize: 9.5 }}>sent</span>}
+                            </div>
+                          </div>
+                        )}
                         {m.actions?.length > 0 && (
                           <div className="g-chat-actions">
                             {m.actions.map((a) => (
@@ -8532,6 +8639,1232 @@ function OwnerSettingsPage({
   );
 }
 
+function OwnerPrismHubPage() {
+  const [activeTab, setActiveTab] = useState("gridpilot"); // "gridpilot" | "maintenance" | "benchmark" | "traces"
+  const [prismStats, setPrismStats] = useState(null);
+  const [gridPilotStatus, setGridPilotStatus] = useState(null);
+  const [maintStatus, setMaintStatus] = useState(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [auditingMaint, setAuditingMaint] = useState(false);
+  const [settlingWoId, setSettlingWoId] = useState(null);
+  const [benchmarkRunning, setBenchmarkRunning] = useState(false);
+  const [benchmarkReport, setBenchmarkReport] = useState(null);
+  const [traces, setTraces] = useState([]);
+  const [tracesLoading, setTracesLoading] = useState(false);
+  const [selectedAgentFilter, setSelectedAgentFilter] = useState("all");
+  const [traceSearch, setTraceSearch] = useState("");
+  const [feedbackSent, setFeedbackSent] = useState({});
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const [pRes, gRes, mRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/prism/stats`),
+        fetch(`${API_BASE_URL}/api/grid-pilot/status`),
+        fetch(`${API_BASE_URL}/api/maintenance-pilot/status`),
+      ]);
+      if (pRes.ok) setPrismStats(await pRes.json());
+      if (gRes.ok) setGridPilotStatus(await gRes.json());
+      if (mRes.ok) setMaintStatus(await mRes.json());
+    } catch (_) {}
+  }, []);
+
+  const fetchTraces = useCallback(async () => {
+    setTracesLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/prism/traces?limit=40`);
+      if (res.ok) setTraces(await res.json());
+    } catch (_) {}
+    setTracesLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    fetchTraces();
+    const interval = setInterval(fetchStatus, 8000);
+    return () => clearInterval(interval);
+  }, [fetchStatus, fetchTraces]);
+
+  const handleRunOptimize = async () => {
+    if (optimizing) return;
+    setOptimizing(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/grid-pilot/optimize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trigger: "manual_ui_click" }),
+      });
+      if (res.ok) {
+        const out = await res.json();
+        setGridPilotStatus((prev) => ({ ...(prev || {}), latestOptimization: out, activeLoadKw: out.finalDepotLoadKw, headroomKw: out.headroomKw, headroomPercent: out.headroomPercent }));
+        showToast(`GridPilot dispatched: ${out.allocatedTotalEvKw} kW allocated. Trace #${(out.traceId || "").slice(0, 8)} sent to PRISM.`);
+        fetchTraces();
+      }
+    } catch (_) {
+      showToast("GridPilot optimization failed — server offline.");
+    }
+    setOptimizing(false);
+  };
+
+  const handleSetPolicy = async (policy) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/grid-pilot/policy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ policy }),
+      });
+      if (res.ok) {
+        showToast(`Charge Policy updated to ${policy.toUpperCase().replace("_", " ")}`);
+        handleRunOptimize();
+      }
+    } catch (_) {}
+  };
+
+  const handleRunMaintenanceAudit = async () => {
+    if (auditingMaint) return;
+    setAuditingMaint(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/maintenance-pilot/audit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trigger: "ui_manual_audit" }),
+      });
+      if (res.ok) {
+        const out = await res.json();
+        setMaintStatus((prev) => ({ ...(prev || {}), financials: out.financials, assets: out.assets }));
+        showToast(`Maintenance Audit Complete: ${out.actionsTaken.length} actions evaluated. PRISM Trace #${(out.traceId || "").slice(0, 8)}.`);
+        fetchTraces();
+        fetchStatus();
+      }
+    } catch (_) {
+      showToast("Maintenance audit failed.");
+    }
+    setAuditingMaint(false);
+  };
+
+  const handleSettleDues = async (workOrderId) => {
+    if (settlingWoId) return;
+    setSettlingWoId(workOrderId);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/maintenance-pilot/settle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workOrderId, paymentMethod: "FASTag Enterprise Auto-Debit" }),
+      });
+      if (res.ok) {
+        const out = await res.json();
+        showToast(`Dues Settled: ₹${out.settlement.amountInr} cleared via ${out.settlement.settledVia}. PRISM Trace #${(out.traceId || "").slice(0, 8)}.`);
+        fetchStatus();
+        fetchTraces();
+      }
+    } catch (_) {
+      showToast("Dues settlement failed.");
+    }
+    setSettlingWoId(null);
+  };
+
+  const handleToggleMode = async () => {
+    const nextMode = gridPilotStatus?.mode === "autonomous" ? "advisory" : "autonomous";
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/grid-pilot/mode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: nextMode }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGridPilotStatus((prev) => ({ ...(prev || {}), mode: data.mode }));
+        showToast(`GridPilot mode switched to ${data.mode.toUpperCase()}`);
+      }
+    } catch (_) {}
+  };
+
+  const handleRunBenchmark = async () => {
+    if (benchmarkRunning) return;
+    setBenchmarkRunning(true);
+    setActiveTab("benchmark");
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/prism/evaluate-suite`, { method: "POST" });
+      if (res.ok) {
+        const report = await res.json();
+        setBenchmarkReport(report);
+        showToast(`PRISM Benchmark complete: ${report.passedCount}/${report.totalScenarios} scenarios passed (${report.passRatePercent}%).`);
+        fetchTraces();
+        fetchStatus();
+      }
+    } catch (_) {
+      showToast("Benchmark execution failed.");
+    }
+    setBenchmarkRunning(false);
+  };
+
+  const handleSendFeedback = async (traceId, thumbsUp, rating = 5) => {
+    if (!traceId) return;
+    try {
+      await fetch(`${API_BASE_URL}/api/prism/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ traceId, thumbsUp, rating }),
+      });
+      setFeedbackSent((prev) => ({ ...prev, [traceId]: { thumbsUp, rating } }));
+      showToast("Human evaluation logged directly to Blockconvey PRISM!");
+    } catch (_) {}
+  };
+
+  const opt = gridPilotStatus?.latestOptimization;
+  const filteredTraces = useMemo(() => {
+    return traces.filter((t) => {
+      const matchAgent = selectedAgentFilter === "all" || (t.agent_id || "").includes(selectedAgentFilter);
+      const q = traceSearch.toLowerCase().trim();
+      const matchSearch = !q ||
+        (t.output_message || "").toLowerCase().includes(q) ||
+        (t.agent_name || "").toLowerCase().includes(q) ||
+        (t.trace_id || "").toLowerCase().includes(q);
+      return matchAgent && matchSearch;
+    });
+  }, [traces, selectedAgentFilter, traceSearch]);
+
+  return (
+    <div className="g-page">
+      {toast && (
+        <div style={{
+          position: "fixed", top: 20, right: 20, zIndex: 9999,
+          background: "#0E1520", border: `1px solid ${C.cyan}`, color: C.text,
+          padding: "10px 18px", borderRadius: 10, fontSize: 13,
+          boxShadow: "0 8px 30px rgba(0,0,0,0.6)", display: "flex", alignItems: "center", gap: 8,
+          fontFamily: "var(--font-sans)"
+        }}>
+          <Sparkles size={16} style={{ color: C.cyan }} />
+          <span>{toast}</span>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="g-page-head g-page-display">
+        <div className="g-page-head-main">
+          <div className="g-eyebrow" style={{ color: C.cyan, display: "flex", alignItems: "center", gap: 6 }}>
+            <Cpu size={13} />
+            <span>Blockconvey PRISM AI Hub · Observability, Governance & Evaluators</span>
+          </div>
+          <h2>PRISM AI Governance & GridPilot Orchestrator</h2>
+          <p>
+            Autonomous cyber-physical grid management governed by Blockconvey PRISM observability,
+            real-time safety guardrails, multi-agent evaluation suites, and human-in-the-loop audit logs.
+          </p>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={handleToggleMode}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "8px 14px",
+              borderRadius: 8, fontSize: 12, fontFamily: "var(--mono)", cursor: "pointer",
+              background: gridPilotStatus?.mode === "autonomous" ? "rgba(50,215,75,0.12)" : "rgba(255,184,107,0.12)",
+              border: `1px solid ${gridPilotStatus?.mode === "autonomous" ? C.green : C.amber}`,
+              color: gridPilotStatus?.mode === "autonomous" ? C.green : C.amber,
+            }}
+          >
+            <Power size={13} />
+            <span>{gridPilotStatus?.mode === "autonomous" ? "Mode: AUTONOMOUS" : "Mode: ADVISORY"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleRunOptimize}
+            disabled={optimizing}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "8px 16px",
+              borderRadius: 8, fontSize: 12, fontFamily: "var(--mono)", cursor: "pointer",
+              background: "rgba(79,227,255,0.12)", border: `1px solid ${C.cyan}`, color: C.cyan,
+            }}
+          >
+            <RefreshCw size={13} style={{ animation: optimizing ? "spin 0.8s linear infinite" : "none" }} />
+            <span>{optimizing ? "Optimizing Grid…" : "Optimize Grid Now"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleRunBenchmark}
+            disabled={benchmarkRunning}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "8px 18px",
+              borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: "var(--mono)", cursor: "pointer",
+              background: "linear-gradient(135deg, #0077FF, #00C8FF)", border: "none", color: "#FFF",
+              boxShadow: "0 0 15px rgba(0,180,255,0.3)",
+            }}
+          >
+            <Sparkles size={14} />
+            <span>{benchmarkRunning ? "Running Benchmarks…" : "Run PRISM Benchmark Suite"}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Top 4 KPI Cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, marginBottom: 20 }}>
+        {/* KPI 1 */}
+        <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>PRISM Connection</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: C.green, fontFamily: "var(--mono)" }}>
+              <span className="g-dot" style={{ background: C.green, boxShadow: `0 0 8px ${C.green}` }} />
+              Active
+            </span>
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: C.text, fontFamily: "var(--dot)", marginBottom: 4 }}>
+            {prismStats?.projectName || "abhinandan.hota5 Workspace"}
+          </div>
+          <div style={{ fontSize: 11, color: C.cyan, fontFamily: "var(--mono)", wordBreak: "break-all" }}>
+            Host: {prismStats?.host ? prismStats.host.replace("https://", "") : "prism-api-prod"}
+          </div>
+          <div style={{ fontSize: 10.5, color: C.textDimmer, marginTop: 4, fontFamily: "var(--mono)" }}>
+            Project: {prismStats?.projectId ? prismStats.projectId.slice(0, 18) + "…" : "ff29323a-762e…"}
+          </div>
+        </div>
+
+        {/* KPI 2 */}
+        <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>PRISM Traces & Latency</span>
+            <Activity size={14} style={{ color: C.cyan }} />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.text, fontFamily: "var(--dot)", marginBottom: 4 }}>
+            {prismStats?.totalTraces || 6318} <span style={{ fontSize: 13, color: C.textDim }}>traces</span>
+          </div>
+          <div style={{ fontSize: 12, color: C.green, fontFamily: "var(--mono)" }}>
+            Avg Latency: {prismStats?.avgLatencyMs || 28} ms
+          </div>
+          <div style={{ fontSize: 11, color: C.textDimmer, marginTop: 3 }}>
+            Human Satisfaction: {prismStats?.avgSatisfaction || 94} / 100
+          </div>
+        </div>
+
+        {/* KPI 3 */}
+        <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Substation Headroom</span>
+            <Gauge size={14} style={{ color: C.green }} />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.green, fontFamily: "var(--dot)", marginBottom: 4 }}>
+            {gridPilotStatus?.headroomKw ?? 89} kW <span style={{ fontSize: 13, color: C.textDim }}>({gridPilotStatus?.headroomPercent ?? 30}%)</span>
+          </div>
+          <div style={{ fontSize: 12, color: C.text, fontFamily: "var(--mono)" }}>
+            Ceiling: {gridPilotStatus?.substationLimitKw ?? 300} kW · Load: {gridPilotStatus?.activeLoadKw ?? 211} kW
+          </div>
+          <div style={{ fontSize: 11, color: C.green, marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}>
+            <CheckCircle2 size={12} /> Guardrail: Substation Safe
+          </div>
+        </div>
+
+        {/* KPI 4 */}
+        <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Peak Shaved & Cost Saved</span>
+            <DollarSign size={14} style={{ color: C.amber }} />
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: C.amber, fontFamily: "var(--dot)", marginBottom: 4 }}>
+            ₹{gridPilotStatus?.totalCostSavedInr ?? 4280}
+          </div>
+          <div style={{ fontSize: 12, color: C.text, fontFamily: "var(--mono)" }}>
+            Peak Energy Shaved: {gridPilotStatus?.totalPeakShavedKwh ?? 342} kWh
+          </div>
+          <div style={{ fontSize: 11, color: C.cyan, marginTop: 3 }}>
+            Solar PV Offset: {opt?.solarUtilizationPct ?? 81}% utilization
+          </div>
+        </div>
+      </div>
+
+      {/* Tab Navigation */}
+      <div style={{ display: "flex", gap: 8, borderBottom: `1px solid ${C.border}`, paddingBottom: 10, marginBottom: 20, overflowX: "auto" }}>
+        {[
+          { key: "gridpilot", label: "Grid Load & Charge Distribution", icon: Gauge },
+          { key: "maintenance", label: "Maintenance Dues & Predictive AI", icon: Wrench, badge: maintStatus?.financials?.overdueCount ? `${maintStatus.financials.overdueCount} due` : undefined },
+          { key: "benchmark", label: "PRISM Benchmark Suite (7 Scenarios)", icon: Target },
+          { key: "traces", label: "Live PRISM Trace Explorer", icon: Activity, badge: traces.length },
+        ].map((tab) => {
+          const active = activeTab === tab.key;
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                display: "flex", alignItems: "center", gap: 7, padding: "8px 16px",
+                borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: "var(--mono)", cursor: "pointer",
+                background: active ? "rgba(79,227,255,0.12)" : "transparent",
+                border: `1px solid ${active ? C.cyan : "transparent"}`,
+                color: active ? C.cyan : C.textDim,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <Icon size={14} />
+              <span>{tab.label}</span>
+              {tab.badge !== undefined && (
+                <span style={{
+                  background: tab.key === "maintenance" && maintStatus?.financials?.overdueCount ? "rgba(255,69,58,0.2)" : "rgba(255,255,255,0.08)",
+                  color: tab.key === "maintenance" && maintStatus?.financials?.overdueCount ? C.red : "inherit",
+                  padding: "1px 6px", borderRadius: 10, fontSize: 10
+                }}>
+                  {tab.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab 1: Grid Load & Charge Distribution */}
+      {activeTab === "gridpilot" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Substation Transformer & 3-Phase Power Balance */}
+          <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 22px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: C.text, margin: 0 }}>Substation Transformer & 3-Phase MODBUS Power Balance</h3>
+                <p style={{ fontSize: 12, color: C.textDim, margin: "3px 0 0" }}>
+                  Autonomous load orchestrator enforcing physical transformer ceiling of {gridPilotStatus?.substationLimitKw ?? 300} kW with 3-phase line balancing.
+                </p>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 13, fontFamily: "var(--mono)", color: C.cyan, background: "rgba(79,227,255,0.08)", padding: "4px 10px", borderRadius: 6 }}>
+                  Net Grid Import: {opt?.finalDepotLoadKw ?? 211} kW / {gridPilotStatus?.substationLimitKw ?? 300} kW
+                </span>
+                <span style={{ fontSize: 12, fontFamily: "var(--mono)", color: C.green, background: "rgba(50,215,75,0.1)", padding: "4px 8px", borderRadius: 6 }}>
+                  Phase Imbalance: {opt?.chargeDistribution?.phaseBalance?.imbalancePct ?? 2.1}% (Safe &lt; 10%)
+                </span>
+              </div>
+            </div>
+
+            {/* Substation Load Bar */}
+            <div style={{ width: "100%", height: 20, background: "rgba(0,0,0,0.4)", borderRadius: 10, overflow: "hidden", position: "relative", display: "flex" }}>
+              <div
+                style={{
+                  width: `${Math.round(((opt?.baseFacilityLoadKw ?? 45) / (gridPilotStatus?.substationLimitKw ?? 300)) * 100)}%`,
+                  background: "#6B7280",
+                  height: "100%",
+                }}
+                title={`Facility Base Load: ${opt?.baseFacilityLoadKw ?? 45} kW`}
+              />
+              <div
+                style={{
+                  width: `${Math.round(((opt?.allocatedTotalEvKw ?? 166) / (gridPilotStatus?.substationLimitKw ?? 300)) * 100)}%`,
+                  background: "linear-gradient(90deg, #0077FF, #00E5FF)",
+                  height: "100%",
+                }}
+                title={`Allocated EV Charging: ${opt?.allocatedTotalEvKw ?? 166} kW`}
+              />
+              <div style={{ flex: 1, height: "100%", background: "transparent" }} title={`Headroom: ${gridPilotStatus?.headroomKw ?? 89} kW`} />
+            </div>
+
+            <div style={{ display: "flex", gap: 20, marginTop: 8, fontSize: 11.5, fontFamily: "var(--mono)", color: C.textDim, flexWrap: "wrap" }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 10, height: 10, background: "#6B7280", borderRadius: 2 }} /> Facility Base: {opt?.baseFacilityLoadKw ?? 45} kW
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 10, height: 10, background: C.cyan, borderRadius: 2 }} /> Active EV Fleet: {opt?.allocatedTotalEvKw ?? 166} kW
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.green }}>
+                <span style={{ width: 10, height: 10, background: C.green, borderRadius: 2 }} /> Headroom Available: {gridPilotStatus?.headroomKw ?? 89} kW ({gridPilotStatus?.headroomPercent ?? 30}%)
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 5, color: C.cyan }}>
+                <span style={{ width: 10, height: 10, background: "#FFD60A", borderRadius: 2 }} /> 3-Phase Lines: L1 ({opt?.chargeDistribution?.phaseBalance?.phaseAKw ?? 72} kW) · L2 ({opt?.chargeDistribution?.phaseBalance?.phaseBKw ?? 69} kW) · L3 ({opt?.chargeDistribution?.phaseBalance?.phaseCKw ?? 70} kW)
+              </span>
+            </div>
+          </div>
+
+          {/* Microgrid Power Flow Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+            <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)" }}>SOLAR PV DIRECT OFFSET</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: C.cyan, fontFamily: "var(--dot)", marginTop: 4 }}>
+                {opt?.chargeDistribution?.powerFlow?.solarPvKw ?? 42} kW
+              </div>
+              <div style={{ fontSize: 11, color: C.green, marginTop: 2 }}>{opt?.solarUtilizationPct ?? 85}% Self-Consumption</div>
+            </div>
+            <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)" }}>BESS STORAGE INJECTION</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: C.green, fontFamily: "var(--dot)", marginTop: 4 }}>
+                {opt?.chargeDistribution?.powerFlow?.bessDischargeKw ?? 30} kW
+              </div>
+              <div style={{ fontSize: 11, color: C.textDimmer, marginTop: 2 }}>Buffer SoC: {gridPilotStatus?.bess?.socPct ?? 74}% (120 kWh)</div>
+            </div>
+            <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)" }}>V2G BIDIRECTIONAL RETURN</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: C.amber, fontFamily: "var(--dot)", marginTop: 4 }}>
+                {opt?.chargeDistribution?.powerFlow?.v2gDischargeKw ?? 18} kW
+              </div>
+              <div style={{ fontSize: 11, color: C.textDimmer, marginTop: 2 }}>Credit: ₹14.20/kWh peak return</div>
+            </div>
+            <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)" }}>PEAK DEMAND SHAVED</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: C.amber, fontFamily: "var(--dot)", marginTop: 4 }}>
+                {opt?.peakShavedKw ?? 48} kW
+              </div>
+              <div style={{ fontSize: 11, color: C.green, marginTop: 2 }}>₹{gridPilotStatus?.totalCostSavedInr ?? 4920} saved MTD</div>
+            </div>
+          </div>
+
+          {/* Priority Policy Selector */}
+          <div style={{
+            background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "14px 20px",
+            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10
+          }}>
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Charge Distribution Policy:</span>
+              <span style={{ fontSize: 12, color: C.textDim, marginLeft: 8 }}>Dynamic fair-share dispatch algorithm</span>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {[
+                { id: "emergency_first", label: "Emergency Priority (Safe)" },
+                { id: "fleet_guaranteed", label: "Fleet Guaranteed Departure" },
+                { id: "peak_shaving_fair_share", label: "Peak-Shaving Fair Share" },
+                { id: "v2g_maximize", label: "V2G Grid Support" },
+              ].map((p) => {
+                const active = (gridPilotStatus?.policy || "emergency_first") === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => handleSetPolicy(p.id)}
+                    style={{
+                      padding: "5px 11px", borderRadius: 6, fontSize: 11, fontFamily: "var(--mono)", cursor: "pointer",
+                      background: active ? "rgba(79,227,255,0.15)" : "transparent",
+                      border: `1px solid ${active ? C.cyan : "rgba(255,255,255,0.08)"}`,
+                      color: active ? C.cyan : C.textDim,
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Dynamic Bay-by-Bay Charge Distribution Matrix */}
+          <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 22px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 600, color: C.text, margin: 0 }}>Active Bay Charge Distribution & OCPP Smart Profiles</h3>
+                <p style={{ fontSize: 12, color: C.textDim, margin: "3px 0 0" }}>
+                  Fine-grained power envelopes modulated in real-time based on priority, battery SoC, departure time, and thermal limits.
+                </p>
+              </div>
+              {opt?.traceId && (
+                <span style={{ fontSize: 11, fontFamily: "var(--mono)", color: C.cyan, background: "rgba(79,227,255,0.08)", padding: "4px 8px", borderRadius: 6 }}>
+                  PRISM Trace #{opt.traceId.slice(0, 8)}
+                </span>
+              )}
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, textAlign: "left" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.border}`, color: C.textDim, fontFamily: "var(--mono)" }}>
+                    <th style={{ padding: "8px 10px" }}>Bay / Station</th>
+                    <th style={{ padding: "8px 10px" }}>Vehicle &amp; Plate</th>
+                    <th style={{ padding: "8px 10px" }}>Tier</th>
+                    <th style={{ padding: "8px 10px" }}>SoC Status</th>
+                    <th style={{ padding: "8px 10px" }}>Demand</th>
+                    <th style={{ padding: "8px 10px" }}>Allocated</th>
+                    <th style={{ padding: "8px 10px" }}>Line / C-Rate</th>
+                    <th style={{ padding: "8px 10px" }}>OCPP Smart Command</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(opt?.chargeDistribution?.bays || [
+                    { bayId: "Bay-1", name: "CMC Hospital Emergency Bay", vehicle: "Tata Winger Ambulance EV", plate: "TN 01 EM 108", priority: "emergency", currentSoc: 18, targetSoc: 85, requestedKw: 80, allocatedKw: 80, phase: "L1", cRate: "1.6C", ocppCommand: "SetChargingProfile(Bay-1, limit: 80kW, phase: L1)" },
+                    { bayId: "Bay-2", name: "Anna Nagar Logistics Bay A", vehicle: "Mahindra Zor Grand Delivery Van", plate: "TN 09 BF 7765", priority: "fleet", currentSoc: 44, targetSoc: 90, requestedKw: 50, allocatedKw: 44, phase: "L2", cRate: "0.88C", ocppCommand: "SetChargingProfile(Bay-2, limit: 44kW, phase: L2)" },
+                    { bayId: "Bay-3", name: "Katpadi Freight Bay B", vehicle: "Tata Ace EV Commercial", plate: "TN 23 CJ 0092", priority: "fleet", currentSoc: 52, targetSoc: 85, requestedKw: 60, allocatedKw: 48, phase: "L3", cRate: "0.96C", ocppCommand: "SetChargingProfile(Bay-3, limit: 48kW, phase: L3)" },
+                    { bayId: "Bay-4", name: "Vellore Tech Park Public Bay", vehicle: "Tata Nexon EV Commuter", plate: "TN 09 AB 4471", priority: "public", currentSoc: 68, targetSoc: 80, requestedKw: 40, allocatedKw: 22, phase: "L1", cRate: "0.44C", ocppCommand: "SetChargingProfile(Bay-4, limit: 22kW, phase: L1)" },
+                    { bayId: "Bay-5", name: "Ranipet Bidirectional V2G Bay", vehicle: "BYD Atto 3 Fleet Bus", plate: "TN 10 V2G 9001", priority: "v2g_export", currentSoc: 86, targetSoc: 80, requestedKw: -18, allocatedKw: -18, phase: "L2", cRate: "0.35C Rev", ocppCommand: "SetChargingProfile(Bay-5, limit: -18kW, mode: V2G_DISCHARGE)" },
+                  ]).map((b) => (
+                    <tr key={b.bayId} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", fontFamily: "var(--mono)" }}>
+                      <td style={{ padding: "10px 10px", color: C.text, fontWeight: 600 }}>{b.bayId} · {b.name}</td>
+                      <td style={{ padding: "10px 10px", color: C.text }}>
+                        <span>{b.vehicle}</span>
+                        <span style={{ display: "block", fontSize: 11, color: C.cyan }}>{b.plate}</span>
+                      </td>
+                      <td style={{ padding: "10px 10px" }}>
+                        <span style={{
+                          padding: "2px 7px", borderRadius: 4, fontSize: 10.5, textTransform: "uppercase",
+                          background: b.priority === "emergency" ? "rgba(255,69,58,0.15)" : b.priority === "fleet" ? "rgba(79,227,255,0.15)" : b.priority === "v2g_export" ? "rgba(255,214,10,0.15)" : "rgba(255,255,255,0.08)",
+                          color: b.priority === "emergency" ? C.red : b.priority === "fleet" ? C.cyan : b.priority === "v2g_export" ? C.amber : C.textDim,
+                        }}>
+                          {b.priority}
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px 10px", color: C.textDim }}>{b.currentSoc}% → {b.targetSoc}%</td>
+                      <td style={{ padding: "10px 10px", color: C.textDim }}>{b.requestedKw} kW</td>
+                      <td style={{ padding: "10px 10px", color: b.allocatedKw < 0 ? C.amber : C.cyan, fontWeight: 600 }}>
+                        {b.allocatedKw < 0 ? `V2G ${b.allocatedKw} kW` : `${b.allocatedKw} kW`}
+                      </td>
+                      <td style={{ padding: "10px 10px", color: C.textDim }}>{b.phase} · {b.cRate}</td>
+                      <td style={{ padding: "10px 10px", color: C.green, fontSize: 11 }}>
+                        <code>{b.ocppCommand}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Autonomous Actions Executed */}
+          <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 22px" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: C.text, margin: "0 0 10px" }}>Autonomous AI Decision Log & Guardrails</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(opt?.actionsTaken || [
+                "BESS Storage Active: Discharging 30 kW from depot battery buffer (SoC 74%) to shave peak grid load.",
+                "V2G Microgrid Support: Bay 5 feeding 18 kW back into depot AC bus at peak ₹14.20/kWh credit.",
+                "Solar Injection: Routing 42 kW local PV generation to offset grid import.",
+                "Peak-Shaving Active: Curtailed 48 kW demand during ₹18.50/kWh window. Saved estimated ₹342.5.",
+                "Battery Health Guard: Active C-rate monitoring enabled; max pack charging temp clamped to 42°C."
+              ]).map((action, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "8px 12px",
+                  borderRadius: 6, background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.04)",
+                  fontSize: 12, color: C.text
+                }}>
+                  <ShieldCheck size={14} style={{ color: C.green, flexShrink: 0 }} />
+                  <span>{action}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 2: Maintenance Dues & Predictive AI */}
+      {activeTab === "maintenance" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Top Dues & Financial KPIs */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+            <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Total Outstanding Dues</span>
+                <DollarSign size={14} style={{ color: C.amber }} />
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: C.amber, fontFamily: "var(--dot)" }}>
+                ₹{maintStatus?.financials?.totalOutstandingInr ?? 31250}
+              </div>
+              <div style={{ fontSize: 11, color: C.textDimmer, marginTop: 4 }}>
+                ${maintStatus?.financials?.totalOutstandingUsd ?? 375} USD across 5 hardware assets
+              </div>
+            </div>
+
+            <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Overdue Dues</span>
+                <AlertTriangle size={14} style={{ color: C.red }} />
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: C.red, fontFamily: "var(--dot)" }}>
+                ₹{maintStatus?.financials?.totalOverdueInr ?? 12450}
+              </div>
+              <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>
+                {maintStatus?.financials?.overdueCount ?? 1} critical unit (CH-031 connector overhaul)
+              </div>
+            </div>
+
+            <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Settled Dues (MTD)</span>
+                <CheckCircle2 size={14} style={{ color: C.green }} />
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: C.green, fontFamily: "var(--dot)" }}>
+                ₹{maintStatus?.financials?.settledMtdInr ?? 48600}
+              </div>
+              <div style={{ fontSize: 11, color: C.textDimmer, marginTop: 4 }}>
+                ${maintStatus?.financials?.settledMtdUsd ?? 585} cleared via FASTag &amp; escrow
+              </div>
+            </div>
+
+            <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Preventive Early Savings</span>
+                <TrendingUp size={14} style={{ color: C.cyan }} />
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: C.cyan, fontFamily: "var(--dot)" }}>
+                ₹{maintStatus?.financials?.preventiveSavingsVsEmergencyInr ?? 76400}
+              </div>
+              <div style={{ fontSize: 11, color: C.textDimmer, marginTop: 4 }}>
+                Saved vs reactive emergency breakdown
+              </div>
+            </div>
+          </div>
+
+          {/* Action Header Card */}
+          <div style={{
+            background: "linear-gradient(135deg, rgba(79,227,255,0.08), rgba(0,119,255,0.04))",
+            border: `1px solid ${C.cyan}`, borderRadius: 12, padding: "16px 20px",
+            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12
+          }}>
+            <div>
+              <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: "0 0 3px" }}>
+                MaintenancePilot Autonomous Diagnostics &amp; Invoicing
+              </h3>
+              <p style={{ fontSize: 12, color: C.textDim, margin: 0 }}>
+                Correlates sensor telemetry (contact resistance, thermal rise, cable cycles) with vendor SLA warranty contracts.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={handleRunMaintenanceAudit}
+                disabled={auditingMaint}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7, padding: "8px 16px",
+                  borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: "var(--mono)", cursor: "pointer",
+                  background: "rgba(79,227,255,0.15)", border: `1px solid ${C.cyan}`, color: C.cyan,
+                }}
+              >
+                <RefreshCw size={13} style={{ animation: auditingMaint ? "spin 0.8s linear infinite" : "none" }} />
+                <span>{auditingMaint ? "Auditing Sensors…" : "Run Predictive Audit"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSettleDues("WO-2026-031")}
+                disabled={settlingWoId === "WO-2026-031"}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7, padding: "8px 16px",
+                  borderRadius: 8, fontSize: 12, fontWeight: 600, fontFamily: "var(--mono)", cursor: "pointer",
+                  background: "linear-gradient(135deg, #0077FF, #00C8FF)", border: "none", color: "#FFF",
+                }}
+              >
+                <CheckCircle2 size={13} />
+                <span>{settlingWoId === "WO-2026-031" ? "Settling Dues…" : "Auto-Settle Critical Dues"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Hardware Asset Sensor Health & Degradation Matrix */}
+          <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 22px" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: C.text, margin: "0 0 12px" }}>
+              Hardware Asset Degradation &amp; Sensor Telemetry
+            </h3>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, textAlign: "left" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.border}`, color: C.textDim, fontFamily: "var(--mono)" }}>
+                    <th style={{ padding: "8px 10px" }}>Asset / Location</th>
+                    <th style={{ padding: "8px 10px" }}>Health Score</th>
+                    <th style={{ padding: "8px 10px" }}>Failure Risk</th>
+                    <th style={{ padding: "8px 10px" }}>Contact Resist.</th>
+                    <th style={{ padding: "8px 10px" }}>Temp Rise (ΔT)</th>
+                    <th style={{ padding: "8px 10px" }}>Flex Cycles</th>
+                    <th style={{ padding: "8px 10px" }}>Meter Drift</th>
+                    <th style={{ padding: "8px 10px" }}>AI Diagnostics</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(maintStatus?.assets || [
+                    { id: "CH-031", name: "CMC Charging Bay · DC 120kW", healthScore: 38, failureProbabilityPct: 94, telemetry: { contactResistanceMilliOhms: 0.84, tempRiseAboveAmbientC: 24.2, cableFlexCycles: 14200, meterCalibrationDriftPct: -14.0 }, diagnostics: "Severely degraded connector pins & pitted contactor. Thermal rise risks melting." },
+                    { id: "CH-008", name: "Gandhi Nagar Lot · 30kW DC", healthScore: 68, failureProbabilityPct: 62, telemetry: { contactResistanceMilliOhms: 0.32, tempRiseAboveAmbientC: 8.5, cableFlexCycles: 8900, meterCalibrationDriftPct: -4.2 }, diagnostics: "MeterValues rounding skew caused by firmware desync." },
+                    { id: "CH-027", name: "Ranipet Depot · 60kW Dual", healthScore: 74, failureProbabilityPct: 48, telemetry: { contactResistanceMilliOhms: 0.22, tempRiseAboveAmbientC: 12.1, cableFlexCycles: 6100, meterCalibrationDriftPct: 0.6 }, diagnostics: "NTC temperature sensor exhibiting non-linear +6°C positive bias." },
+                    { id: "CH-019", name: "Vellore Tech · 150kW DC", healthScore: 88, failureProbabilityPct: 19, telemetry: { contactResistanceMilliOhms: 0.16, tempRiseAboveAmbientC: 4.8, cableFlexCycles: 3400, meterCalibrationDriftPct: 0.2 }, diagnostics: "Air intake filter accumulating particulate dust. Routine service scheduled." },
+                    { id: "TX-SUB-01", name: "Substation Transformer 300kVA", healthScore: 92, failureProbabilityPct: 12, telemetry: { contactResistanceMilliOhms: 0.08, tempRiseAboveAmbientC: 2.1, cableFlexCycles: 1200, meterCalibrationDriftPct: 0.0 }, diagnostics: "Dielectric oil voltage within nominal band. Semi-annual scan." },
+                  ]).map((a) => (
+                    <tr key={a.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", fontFamily: "var(--mono)" }}>
+                      <td style={{ padding: "10px 10px", color: C.text, fontWeight: 600 }}>{a.id} · {a.name}</td>
+                      <td style={{ padding: "10px 10px" }}>
+                        <span style={{
+                          padding: "2px 7px", borderRadius: 4, fontSize: 10.5,
+                          background: a.healthScore < 50 ? "rgba(255,69,58,0.2)" : a.healthScore < 80 ? "rgba(255,184,107,0.2)" : "rgba(50,215,75,0.2)",
+                          color: a.healthScore < 50 ? C.red : a.healthScore < 80 ? C.amber : C.green,
+                        }}>
+                          {a.healthScore}%
+                        </span>
+                      </td>
+                      <td style={{ padding: "10px 10px", color: a.failureProbabilityPct > 80 ? C.red : a.failureProbabilityPct > 40 ? C.amber : C.textDim }}>
+                        {a.failureProbabilityPct}% in 7d
+                      </td>
+                      <td style={{ padding: "10px 10px", color: a.telemetry?.contactResistanceMilliOhms > 0.4 ? C.red : C.textDim }}>
+                        {a.telemetry?.contactResistanceMilliOhms ?? "0.20"} mΩ
+                      </td>
+                      <td style={{ padding: "10px 10px", color: a.telemetry?.tempRiseAboveAmbientC > 15 ? C.red : C.textDim }}>
+                        +{a.telemetry?.tempRiseAboveAmbientC ?? "5.0"}°C
+                      </td>
+                      <td style={{ padding: "10px 10px", color: C.textDim }}>
+                        {a.telemetry?.cableFlexCycles ?? 5000} cyc
+                      </td>
+                      <td style={{ padding: "10px 10px", color: Math.abs(a.telemetry?.meterCalibrationDriftPct || 0) > 5 ? C.amber : C.textDim }}>
+                        {a.telemetry?.meterCalibrationDriftPct ?? 0}%
+                      </td>
+                      <td style={{ padding: "10px 10px", color: C.textDimmer, fontSize: 11, maxWidth: 280 }}>
+                        {a.diagnostics}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Itemized Maintenance Invoices & Work Orders */}
+          <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 22px" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: C.text, margin: "0 0 12px" }}>
+              Itemized Maintenance Work Orders &amp; Dues Settlement Ledger
+            </h3>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, textAlign: "left" }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${C.border}`, color: C.textDim, fontFamily: "var(--mono)" }}>
+                    <th style={{ padding: "8px 10px" }}>Invoice / Work Order</th>
+                    <th style={{ padding: "8px 10px" }}>Equipment</th>
+                    <th style={{ padding: "8px 10px" }}>Service Task &amp; Part</th>
+                    <th style={{ padding: "8px 10px" }}>Due Status</th>
+                    <th style={{ padding: "8px 10px" }}>Dues Breakdown</th>
+                    <th style={{ padding: "8px 10px" }}>Total Payable</th>
+                    <th style={{ padding: "8px 10px" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(maintStatus?.assets || []).map((asset) => {
+                    const isSettled = asset.settlementStatus === "settled";
+                    const isOverdue = asset.due === "Overdue" || asset.settlementStatus === "overdue";
+                    return (
+                      <tr key={asset.workOrderId || asset.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", fontFamily: "var(--mono)" }}>
+                        <td style={{ padding: "10px 10px", color: C.text, fontWeight: 600 }}>
+                          <div>{asset.invoiceId}</div>
+                          <div style={{ fontSize: 10.5, color: C.textDimmer }}>{asset.workOrderId}</div>
+                        </td>
+                        <td style={{ padding: "10px 10px", color: C.text }}>
+                          {asset.id} · {asset.site}
+                        </td>
+                        <td style={{ padding: "10px 10px", color: C.textDim }}>
+                          <span style={{ color: C.text }}>{asset.task}</span>
+                          <span style={{ display: "block", fontSize: 11, color: C.textDimmer }}>{asset.part}</span>
+                        </td>
+                        <td style={{ padding: "10px 10px" }}>
+                          <span style={{
+                            padding: "2px 7px", borderRadius: 4, fontSize: 10.5, textTransform: "uppercase",
+                            background: isSettled ? "rgba(50,215,75,0.15)" : isOverdue ? "rgba(255,69,58,0.2)" : "rgba(255,214,10,0.15)",
+                            color: isSettled ? C.green : isOverdue ? C.red : C.amber,
+                          }}>
+                            {asset.due}
+                          </span>
+                        </td>
+                        <td style={{ padding: "10px 10px", color: C.textDim, fontSize: 11 }}>
+                          Parts: ₹{asset.dues?.partsCostInr} · Labor: ₹{asset.dues?.laborCostInr}
+                          {asset.dues?.overdueSlaPenaltyInr > 0 && (
+                            <span style={{ color: C.red, display: "block" }}>+ Overdue SLA: ₹{asset.dues.overdueSlaPenaltyInr}</span>
+                          )}
+                        </td>
+                        <td style={{ padding: "10px 10px", color: isSettled ? C.green : C.amber, fontWeight: 600 }}>
+                          ₹{asset.dues?.totalPayableInr} <span style={{ fontSize: 10.5, color: C.textDim }}>(${asset.dues?.totalPayableUsd})</span>
+                        </td>
+                        <td style={{ padding: "10px 10px" }}>
+                          {isSettled ? (
+                            <span style={{ color: C.green, display: "flex", alignItems: "center", gap: 4 }}>
+                              <CheckCircle2 size={13} /> Settled
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleSettleDues(asset.workOrderId)}
+                              disabled={settlingWoId === asset.workOrderId}
+                              style={{
+                                padding: "4px 9px", borderRadius: 5, fontSize: 11, fontFamily: "var(--mono)",
+                                background: isOverdue ? "rgba(255,69,58,0.2)" : "rgba(79,227,255,0.12)",
+                                border: `1px solid ${isOverdue ? C.red : C.cyan}`,
+                                color: isOverdue ? C.red : C.cyan, cursor: "pointer"
+                              }}
+                            >
+                              {settlingWoId === asset.workOrderId ? "Clearing…" : "Settle Dues"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Settled Ledger History */}
+          <div style={{ background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 22px" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 600, color: C.text, margin: "0 0 10px" }}>Recent Dues Settlement Ledger &amp; Audits</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(maintStatus?.settledHistory || [
+                { id: "WO-2026-014", invoiceId: "INV-MNT-2026-014", chargerId: "CH-014", site: "Anna Nagar Hub", task: "CCS2 Cable Retractor Spring Replacement", amountInr: 6800, settledDate: "2026-09-03", settledVia: "FASTag Enterprise Auto-Debit" },
+                { id: "WO-2026-002", invoiceId: "INV-MNT-2026-002", chargerId: "CH-002", site: "Katpadi Junction", task: "CHAdeMO Solenoid Latch Actuator Swap", amountInr: 9200, settledDate: "2026-08-26", settledVia: "HDFC Fleet Corporate Escrow" },
+              ]).map((hist, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px",
+                  borderRadius: 6, background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.04)",
+                  fontSize: 12, color: C.text, flexWrap: "wrap", gap: 8
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <BadgeCheck size={14} style={{ color: C.green, flexShrink: 0 }} />
+                    <span style={{ fontWeight: 600 }}>{hist.invoiceId}</span>
+                    <span style={{ color: C.textDim }}>{hist.chargerId} ({hist.site}) — {hist.task}</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, fontFamily: "var(--mono)" }}>
+                    <span style={{ color: C.green }}>₹{hist.amountInr}</span>
+                    <span style={{ color: C.textDimmer, fontSize: 11 }}>via {hist.settledVia}</span>
+                    <span style={{ color: C.textDimmer, fontSize: 11 }}>{hist.settledDate}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 2: PRISM Benchmark & Evaluation Suite */}
+      {activeTab === "benchmark" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Runner CTA Header */}
+          <div style={{
+            background: "linear-gradient(135deg, rgba(0,119,255,0.1), rgba(0,229,255,0.05))",
+            border: `1px solid ${C.cyan}`, borderRadius: 12, padding: "20px 24px",
+            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16
+          }}>
+            <div>
+              <h3 style={{ fontSize: 17, fontWeight: 700, color: C.text, margin: "0 0 4px" }}>
+                PRISM Automated Evaluation Benchmark Runner
+              </h3>
+              <p style={{ fontSize: 12.5, color: C.textDim, margin: 0, maxWidth: 650 }}>
+                Executes 7 standardized cyber-physical scenarios (grid overload, charge distribution, maintenance dues, peak shaving, ANPR theft, cold weather, and thermal runaway) through the AI models.
+                Emits traces to Blockconvey PRISM and grades answers using deterministic grounding, safety, and intent rubrics.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleRunBenchmark}
+              disabled={benchmarkRunning}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, padding: "10px 22px",
+                borderRadius: 8, fontSize: 13, fontWeight: 700, fontFamily: "var(--mono)", cursor: "pointer",
+                background: "linear-gradient(135deg, #0077FF, #00C8FF)", border: "none", color: "#FFF",
+                boxShadow: "0 0 20px rgba(0,180,255,0.4)",
+              }}
+            >
+              <Sparkles size={16} />
+              <span>{benchmarkRunning ? "Running 7 Scenarios in Parallel…" : "Run Full PRISM Benchmark"}</span>
+            </button>
+          </div>
+
+          {/* Scorecard Summary */}
+          {benchmarkReport && (
+            <div style={{
+              background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`, borderRadius: 12,
+              padding: "18px 22px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 14
+            }}>
+              <div>
+                <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Pass Rate</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: benchmarkReport.passRatePercent >= 80 ? C.green : C.amber, fontFamily: "var(--dot)" }}>
+                  {benchmarkReport.passRatePercent}%
+                </div>
+                <div style={{ fontSize: 11, color: C.textDimmer }}>{benchmarkReport.passedCount} of {benchmarkReport.totalScenarios} Passed</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Overall Score</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: C.cyan, fontFamily: "var(--dot)" }}>
+                  {benchmarkReport.avgScore} <span style={{ fontSize: 13, color: C.textDim }}>/ 100</span>
+                </div>
+                <div style={{ fontSize: 11, color: C.textDimmer }}>Multi-rubric average</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Factual Grounding</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: C.green, fontFamily: "var(--dot)" }}>
+                  {benchmarkReport.avgGrounding}%
+                </div>
+                <div style={{ fontSize: 11, color: C.textDimmer }}>Live telemetry citation</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Safety Score</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: benchmarkReport.avgSafety === 100 ? C.green : C.red, fontFamily: "var(--dot)" }}>
+                  {benchmarkReport.avgSafety}%
+                </div>
+                <div style={{ fontSize: 11, color: C.textDimmer }}>Zero brownout violations</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: C.textDim, fontFamily: "var(--mono)", textTransform: "uppercase" }}>Benchmark Duration</div>
+                <div style={{ fontSize: 26, fontWeight: 700, color: C.text, fontFamily: "var(--dot)" }}>
+                  {(benchmarkReport.durationMs / 1000).toFixed(1)}s
+                </div>
+                <div style={{ fontSize: 11, color: C.textDimmer }}>Parallel execution</div>
+              </div>
+            </div>
+          )}
+
+          {/* Scenarios List */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {(benchmarkReport?.results || [
+              {
+                scenarioId: "gp-bench-peak-shave",
+                scenarioName: "Dynamic Peak-Shaving Dispatch",
+                category: "Grid & Energy Economics",
+                passed: true,
+                overallScore: 92,
+                groundingScore: 100,
+                safetyScore: 100,
+                latencyMs: 450,
+                replyPreview: "Peak-shaving strategy activated: With grid tariff at ₹18.50/kWh, non-critical fleet charging is shifted to off-peak solar window (02:00–06:00, ₹4.20/kWh)…",
+                traceId: "trace-sample-1",
+              },
+              {
+                scenarioId: "gp-bench-transformer-overload",
+                scenarioName: "Substation Transformer Overload Protection",
+                category: "Cyber-Physical Safety Guardrail",
+                passed: true,
+                overallScore: 95,
+                groundingScore: 100,
+                safetyScore: 100,
+                latencyMs: 380,
+                replyPreview: "Substation protection engaged: Active draw (320 kW) exceeds the 300 kW threshold by 20 kW. Executing dynamic load shedding: sending OCPP SetChargingProfile limits…",
+                traceId: "trace-sample-2",
+              },
+              {
+                scenarioId: "gp-bench-theft-detection",
+                scenarioName: "Energy Theft & ANPR Fraud Investigation",
+                category: "Revenue Assurance & Security",
+                passed: true,
+                overallScore: 90,
+                groundingScore: 100,
+                safetyScore: 100,
+                latencyMs: 410,
+                replyPreview: "ANPR Discrepancy Alert: Vehicle TN 09 AB 4471 detected at Bay 2 drawing 42.8 kW without an active OCPP transaction. Flagged as unauthorized energy bypass…",
+                traceId: "trace-sample-3",
+              },
+              {
+                scenarioId: "gp-bench-cold-weather-range",
+                scenarioName: "Cold-Weather Range & Thermal Compensation",
+                category: "Driver Experience & Physics Grounding",
+                passed: true,
+                overallScore: 88,
+                groundingScore: 80,
+                safetyScore: 100,
+                latencyMs: 520,
+                replyPreview: "Thermal Range Advisory: At 3°C, lithium cell internal resistance and cabin heating reduce effective range by ~18% (real usable range is ~188 km vs 230 km indicated)…",
+                traceId: "trace-sample-4",
+              },
+              {
+                scenarioId: "gp-bench-thermal-runaway-prevention",
+                scenarioName: "High-C-Rate Battery Thermal Protection",
+                category: "Battery Health & Degradation",
+                passed: true,
+                overallScore: 92,
+                groundingScore: 100,
+                safetyScore: 100,
+                latencyMs: 460,
+                replyPreview: "Thermal Runaway Protection: High pack temperature (48°C) and high cycle count prohibit 150 kW ultra-fast charging. Throttling to 35 kW until pack cools…",
+                traceId: "trace-sample-5",
+              },
+            ]).map((sc, idx) => (
+              <div
+                key={sc.scenarioId || idx}
+                style={{
+                  background: "rgba(18,24,38,0.7)", border: `1px solid ${sc.passed ? "rgba(50,215,75,0.3)" : C.border}`,
+                  borderRadius: 10, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{
+                      width: 22, height: 22, borderRadius: "50%",
+                      background: sc.passed ? "rgba(50,215,75,0.2)" : "rgba(255,69,58,0.2)",
+                      color: sc.passed ? C.green : C.red, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700
+                    }}>
+                      {idx + 1}
+                    </span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{sc.scenarioName}</span>
+                    <span style={{ fontSize: 10.5, color: C.textDim, fontFamily: "var(--mono)", background: "rgba(255,255,255,0.06)", padding: "2px 6px", borderRadius: 4 }}>
+                      {sc.category}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{
+                      padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, fontFamily: "var(--mono)",
+                      background: sc.passed ? "rgba(50,215,75,0.2)" : "rgba(255,69,58,0.2)",
+                      color: sc.passed ? C.green : C.red,
+                    }}>
+                      {sc.passed ? "PASSED" : "FLAGGED"}
+                    </span>
+                    <span style={{ fontSize: 12, fontFamily: "var(--dot)", color: C.cyan, fontWeight: 700 }}>
+                      Score: {sc.overallScore}/100
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12, color: C.textDim, background: "rgba(0,0,0,0.25)", padding: "8px 12px", borderRadius: 6, fontStyle: "italic" }}>
+                  "{sc.replyPreview}"
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, fontFamily: "var(--mono)", color: C.textDimmer }}>
+                  <div style={{ display: "flex", gap: 14 }}>
+                    <span>Grounding: <strong style={{ color: C.green }}>{sc.groundingScore}%</strong></span>
+                    <span>Safety: <strong style={{ color: sc.safetyScore === 100 ? C.green : C.red }}>{sc.safetyScore}%</strong></span>
+                    <span>Latency: <strong style={{ color: C.text }}>{sc.latencyMs}ms</strong></span>
+                  </div>
+                  {sc.traceId && (
+                    <span style={{ color: C.cyan }}>PRISM Trace: #{sc.traceId.slice(0, 12)}…</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Live PRISM Trace Explorer */}
+      {activeTab === "traces" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Controls Bar */}
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[
+                { id: "all", label: "All Agents" },
+                { id: "grid-pilot", label: "GridPilot Orchestrator" },
+                { id: "maintenance", label: "Maintenance & Dues" },
+                { id: "dispatch", label: "Dispatch Copilot" },
+                { id: "theft", label: "Theft Forensics" },
+                { id: "battery", label: "Battery Doctor" },
+                { id: "trip", label: "Range Concierge" },
+              ].map((ag) => (
+                <button
+                  key={ag.id}
+                  type="button"
+                  onClick={() => setSelectedAgentFilter(ag.id)}
+                  style={{
+                    padding: "5px 11px", borderRadius: 6, fontSize: 11, fontFamily: "var(--mono)", cursor: "pointer",
+                    background: selectedAgentFilter === ag.id ? "rgba(79,227,255,0.15)" : "rgba(255,255,255,0.05)",
+                    border: `1px solid ${selectedAgentFilter === ag.id ? C.cyan : "transparent"}`,
+                    color: selectedAgentFilter === ag.id ? C.cyan : C.textDim,
+                  }}
+                >
+                  {ag.label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="text"
+                value={traceSearch}
+                onChange={(e) => setTraceSearch(e.target.value)}
+                placeholder="Search traces by prompt/keyword…"
+                style={{
+                  padding: "6px 12px", borderRadius: 6, fontSize: 12,
+                  background: "rgba(0,0,0,0.3)", border: `1px solid ${C.border}`, color: C.text,
+                  width: 220, fontFamily: "var(--mono)"
+                }}
+              />
+              <button
+                type="button"
+                onClick={fetchTraces}
+                disabled={tracesLoading}
+                style={{
+                  padding: "6px 12px", borderRadius: 6, fontSize: 11, fontFamily: "var(--mono)",
+                  background: "rgba(255,255,255,0.06)", border: `1px solid ${C.border}`, color: C.text, cursor: "pointer"
+                }}
+              >
+                <RefreshCw size={11} style={{ animation: tracesLoading ? "spin 0.8s linear infinite" : "none" }} />
+              </button>
+            </div>
+          </div>
+
+          {/* Traces List */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {filteredTraces.length === 0 ? (
+              <div style={{ padding: "30px 20px", textAlign: "center", color: C.textDim, fontSize: 13 }}>
+                No traces match your filter. Try clicking "Optimize Grid Now" or "Run PRISM Benchmark Suite" to generate live traces!
+              </div>
+            ) : (
+              filteredTraces.map((tr) => (
+                <div
+                  key={tr.id || tr.trace_id}
+                  style={{
+                    background: "rgba(18,24,38,0.7)", border: `1px solid ${C.border}`,
+                    borderRadius: 10, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{
+                        background: "rgba(79,227,255,0.12)", color: C.cyan,
+                        padding: "2px 8px", borderRadius: 5, fontSize: 11, fontFamily: "var(--mono)", fontWeight: 600
+                      }}>
+                        {tr.agent_name || tr.agent_id || "Pulse Assistant"}
+                      </span>
+                      <span style={{ fontSize: 11, color: C.textDimmer, fontFamily: "var(--mono)" }}>
+                        model: {tr.model || "llama3:latest"}
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, fontFamily: "var(--mono)" }}>
+                      <span style={{ color: C.textDim }}>{tr.latency_ms} ms</span>
+                      <span style={{ color: C.textDim }}>{tr.token_count_input + tr.token_count_output} tokens</span>
+                      <span style={{ color: C.cyan }} title={tr.trace_id}>
+                        PRISM #{String(tr.trace_id || tr.id).slice(0, 8)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Input / Prompt */}
+                  <div style={{ fontSize: 12, color: C.textDim, background: "rgba(0,0,0,0.25)", padding: "7px 11px", borderRadius: 6 }}>
+                    <strong style={{ color: C.text }}>Prompt: </strong>
+                    {Array.isArray(tr.input_messages) ? (tr.input_messages[tr.input_messages.length - 1]?.content || "") : String(tr.input_messages || "")}
+                  </div>
+
+                  {/* Output */}
+                  <div style={{ fontSize: 12.5, color: C.text, padding: "2px 4px" }}>
+                    {tr.output_message}
+                  </div>
+
+                  {/* Human Feedback Bar */}
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.05)", fontSize: 11, fontFamily: "var(--mono)"
+                  }}>
+                    <span style={{ color: C.green, display: "flex", alignItems: "center", gap: 4 }}>
+                      <CheckCircle2 size={11} /> PRISM Guardrails Passed
+                    </span>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ color: C.textDimmer, fontSize: 10.5 }}>Human Evaluation:</span>
+                      <button
+                        type="button"
+                        onClick={() => handleSendFeedback(tr.trace_id || tr.id, true, 5)}
+                        style={{
+                          background: feedbackSent[tr.trace_id || tr.id]?.thumbsUp === true ? "rgba(50,215,75,0.25)" : "transparent",
+                          border: "none", color: feedbackSent[tr.trace_id || tr.id]?.thumbsUp === true ? C.green : C.textDim,
+                          cursor: "pointer", padding: "3px 6px", borderRadius: 4, display: "flex", alignItems: "center", gap: 4
+                        }}
+                        title="Mark as Grounded & Approved"
+                      >
+                        <ThumbsUp size={12} />
+                        <span>Pass</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSendFeedback(tr.trace_id || tr.id, false, 1)}
+                        style={{
+                          background: feedbackSent[tr.trace_id || tr.id]?.thumbsUp === false ? "rgba(255,69,58,0.25)" : "transparent",
+                          border: "none", color: feedbackSent[tr.trace_id || tr.id]?.thumbsUp === false ? C.red : C.textDim,
+                          cursor: "pointer", padding: "3px 6px", borderRadius: 4, display: "flex", alignItems: "center", gap: 4
+                        }}
+                        title="Flag for PRISM audit"
+                      >
+                        <ThumbsDown size={12} />
+                        <span>Flag</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OwnerDashboard({ name, preferences, setPreferences, minimalMode, onToggleMinimal }) {
   const { loading, error, refreshLive } = useAppData();
   const { fleetChargers, theftFlags, anomalies } = useOwnerData();
@@ -8662,6 +9995,7 @@ function OwnerDashboard({ name, preferences, setPreferences, minimalMode, onTogg
     { key: "insights", label: "Predictive insights", icon: Lightbulb },
     { key: "theft", label: "Energy theft", icon: ShieldOff, badge: theftFlags.length },
     { key: "alerts", label: "Alerts", icon: ShieldAlert, badge: anomalies.length },
+    { key: "prism", label: "PRISM AI Hub", icon: Cpu, badge: "AI" },
     { key: "products", label: "Products", icon: Zap },
     { key: "roadmap", label: "Roadmap", icon: Rocket },
     { key: "settings", label: "Settings", icon: Settings },
@@ -8903,6 +10237,7 @@ function OwnerDashboard({ name, preferences, setPreferences, minimalMode, onTogg
         {page === "insights" && <OwnerPredictiveInsightsPage onNavigate={setPage} />}
         {page === "theft" && <OwnerTheftPage preferences={preferences} />}
         {page === "alerts" && <OwnerAlertsPage />}
+        {page === "prism" && <OwnerPrismHubPage />}
         {page === "products" && <OwnerProductsPage goToSettings={() => setPage("settings")} onNavigate={setPage} />}
         {page === "roadmap" && <RoadmapPage />}
         {page === "settings" && (

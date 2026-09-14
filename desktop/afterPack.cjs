@@ -22,6 +22,9 @@ exports.default = async function afterPack(context) {
   const appName = context.packager.appInfo.productFilename;
   const appPath = path.join(context.appOutDir, `${appName}.app`);
 
+  try {
+    execFileSync("dot_clean", ["-m", appPath], { stdio: "ignore" });
+  } catch (_) {}
   execFileSync("xattr", ["-cr", appPath], { stdio: "inherit" });
   execFileSync(
     "codesign",

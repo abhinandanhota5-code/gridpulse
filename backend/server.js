@@ -26,6 +26,10 @@ const { geocode } = require("./geocode");
 const { fetchRoute } = require("./osrm");
 const chat = require("./chat");
 const ai = require("./ollama");
+const prism = require("./prism");
+const evaluator = require("./prism-evaluator");
+const gridPilot = require("./grid-pilot");
+const maintenancePilot = require("./maintenance-pilot");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -45,38 +49,10 @@ app.use(
 );
 app.use(express.json({ limit: "1mb" }));
 
-/* ---- PRISMtap: backend request tracing (fire-and-forget, sampled) ----
-   Traces the REST/API handlers as PrismTrace "spans" alongside the deeper
-   assistant traces emitted in chat.js. Enabled only when
-   PRISMTRACE_PROJECT_ID + PRISMTRACE_API_KEY are set; never blocks the
-   request, and never touches streams or the already-traced chat route.
-   ---------------------------------------------------------------- */
-const { emitTrace: emitPrismSpan } = chat;
-let prismRequestCount = 0;
-app.use("/api", (req, res, next) => {
-  if (req.path === "/stream" || req.path === "/chat" || req.path === "/chat/config") return next();
-  const t0 = Date.now();
-  const started = ++prismRequestCount;
-  res.on("finish", () => {
-    const code = res.statusCode;
-    const traceable = req.method === "POST" || code >= 400 || started % 3 === 0;
-    if (!traceable) return;
-    emitPrismSpan({
-      inputMessages: [{ role: "user", content: `${req.method} ${req.path}` }],
-      outputMessage: `HTTP ${code}`,
-      model: "gridpulse-api",
-      latencyMs: Date.now() - t0,
-      sessionId: undefined,
-      metadata: {
-        route: `${req.baseUrl}${req.path}`,
-        method: req.method,
-        status: code,
-        source: "gridpulse-backend",
-      },
-    });
-  });
-  next();
-});
+/* ---- PRISM Observability: dedicated to AI agents & evaluation runs ----
+   All AI copilots (Dispatch, Theft, Battery, Trip, Pulse) and automated
+   evaluation benchmarks emit structured traces directly through prism.js.
+   ---------------------------------------------------------------------- */
 
 /* Capture the raw XML/JSON body for the OpenADR endpoints. */
 app.use("/openadr", (req, res, next) => {
@@ -220,11 +196,112 @@ app.post("/api/ai/recover", async (_req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { message, history, apiKey, baseURL, model, sessionId } = req.body || {};
+  const { message, history, apiKey, baseURL, model, sessionId, agentMode, userRole, userId } = req.body || {};
   const text = String(message || "").trim();
   if (!text) return res.status(400).json({ error: "message required", mode: "local" });
   const session = String(sessionId || "").trim().slice(0, 128) || undefined;
-  res.json(await chat.ask({ message: text, history, apiKey, baseURL, model, sessionId: session }));
+  res.json(await chat.ask({
+    message: text,
+    history,
+    apiKey,
+    baseURL,
+    model,
+    sessionId: session,
+    agentMode: agentMode || "general",
+    userRole: userRole || "driver",
+    userId,
+  }));
+});
+
+/* ---- PRISM AI Observability & Evaluation Hub routes ---- */
+app.get("/api/prism/status", (_req, res) => {
+  res.json({
+    enabled: prism.prismEnabled(),
+    host: prism.prismHost(),
+    projectId: prism.prismProjectId(),
+  });
+});
+
+app.get("/api/prism/stats", async (_req, res) => {
+  res.json(await prism.getStats());
+});
+
+app.get("/api/prism/traces", async (req, res) => {
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+  res.json(await prism.getTraces(limit));
+});
+
+app.post("/api/prism/feedback", async (req, res) => {
+  const { traceId, sessionId, thumbsUp, rating, comment } = req.body || {};
+  if (!traceId) return res.status(400).json({ error: "traceId required" });
+  res.json(await prism.submitFeedback({ traceId, sessionId, thumbsUp, rating, comment }));
+});
+
+app.get("/api/prism/scenarios", (_req, res) => {
+  res.json({ scenarios: evaluator.BENCHMARK_SCENARIOS });
+});
+
+app.post("/api/prism/evaluate-suite", async (_req, res) => {
+  try {
+    const report = await evaluator.runEvaluationSuite();
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: "evaluation_failed", message: err.message });
+  }
+});
+
+/* ---- GridPilot: Autonomous Grid AI & Load Orchestration routes ---- */
+app.get("/api/grid-pilot/status", (_req, res) => {
+  res.json(gridPilot.getStatus());
+});
+
+app.post("/api/grid-pilot/optimize", async (req, res) => {
+  try {
+    const out = await gridPilot.optimize(req.body || {});
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: "optimization_failed", message: err.message });
+  }
+});
+
+app.post("/api/grid-pilot/mode", (req, res) => {
+  const { mode } = req.body || {};
+  res.json({ mode: gridPilot.setMode(mode) });
+});
+
+app.post("/api/grid-pilot/limit", (req, res) => {
+  const { limit } = req.body || {};
+  res.json({ substationLimitKw: gridPilot.setSubstationLimit(limit) });
+});
+
+app.post("/api/grid-pilot/policy", (req, res) => {
+  const { policy } = req.body || {};
+  res.json({ policy: gridPilot.setPolicy(policy) });
+});
+
+/* ---- MaintenancePilot: Autonomous Maintenance & Dues Orchestrator routes ---- */
+app.get("/api/maintenance-pilot/status", (_req, res) => {
+  res.json(maintenancePilot.getStatus());
+});
+
+app.post("/api/maintenance-pilot/audit", async (req, res) => {
+  try {
+    const out = await maintenancePilot.runAudit(req.body || {});
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: "audit_failed", message: err.message });
+  }
+});
+
+app.post("/api/maintenance-pilot/settle", async (req, res) => {
+  try {
+    const { workOrderId, paymentMethod, referenceNote } = req.body || {};
+    if (!workOrderId) return res.status(400).json({ error: "workOrderId required" });
+    const out = await maintenancePilot.settleDues({ workOrderId, paymentMethod, referenceNote });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: "settlement_failed", message: err.message });
+  }
 });
 
 /* ---- edge-agent ingest bridges (Josev V2G + VOLTTRON) ---- */
