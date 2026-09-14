@@ -1,40 +1,45 @@
 /* ---------------------------------------------------------------- */
-/*  Brand tokens — carried over from the GRIDPULSE marketing site    */
+/*  Brand tokens — GRIDPULSE · Apple-inspired iOS "liquid glass".    */
+/*  Dark = near-black with vivid blue, Light = iOS grouped paper.    */
+/*  Panels are translucent frosted glass; the accent is iOS blue.     */
 /* ---------------------------------------------------------------- */
+export const IOS_BLUE_LIGHT = "#007AFF";
+export const IOS_BLUE_DARK = "#0A84FF";
+
 export const THEMES = {
   default: {
-    bg: "#070707",
-    bg2: "#101010",
-    panel: "rgba(18,18,18,0.72)",
-    panelSolid: "#121212",
-    border: "rgba(255,255,255,0.08)",
-    borderSoft: "rgba(255,255,255,0.05)",
-    cyan: "#f3f3f3",
-    cyanSoft: "rgba(243,243,243,0.08)",
-    green: "#7fe5b8",
-    greenSoft: "rgba(127,229,184,0.12)",
-    amber: "#f3c86a",
-    red: "#ff6a6a",
-    text: "#f5f5f5",
-    textDim: "#b9b9b9",
-    textDimmer: "#6f6f6f",
+    bg: "#000000",
+    bg2: "#0a0a0c",
+    panel: "rgba(255,255,255,0.085)",
+    panelSolid: "rgba(26,26,28,0.92)",
+    border: "rgba(255,255,255,0.13)",
+    borderSoft: "rgba(255,255,255,0.075)",
+    cyan: IOS_BLUE_DARK,
+    cyanSoft: "rgba(10,132,255,0.14)",
+    green: "#30D158",
+    greenSoft: "rgba(48,209,88,0.14)",
+    amber: "#FFD60A",
+    red: "#FF453A",
+    text: "#F5F5F7",
+    textDim: "#A1A1A6",
+    textDimmer: "#6E6E73",
   },
   minimal: {
-    bg: "#f4f1ee",
-    bg2: "#efebe7",
-    panel: "rgba(255,255,255,0.8)",
-    panelSolid: "#fffdfb",
-    border: "rgba(17,24,39,0.12)",
-    borderSoft: "rgba(17,24,39,0.08)",
-    cyan: "#1c1c1c",
-    cyanSoft: "rgba(17,24,39,0.06)",
-    green: "#2c9a6a",
-    greenSoft: "rgba(44,154,106,0.12)",
-    amber: "#c5781a",
-    red: "#d8474f",
-    text: "#111111",
-    textDim: "#4f4f4f",
-    textDimmer: "#7a7a7a",
+    bg: "#F2F2F7",
+    bg2: "#E5E5EA",
+    panel: "rgba(255,255,255,0.68)",
+    panelSolid: "rgba(255,255,255,0.94)",
+    border: "rgba(0,0,0,0.12)",
+    borderSoft: "rgba(0,0,0,0.06)",
+    cyan: IOS_BLUE_LIGHT,
+    cyanSoft: "rgba(0,122,255,0.14)",
+    green: "#34C759",
+    greenSoft: "rgba(52,199,89,0.16)",
+    amber: "#FF9F0A",
+    red: "#FF3B30",
+    text: "#1C1C1E",
+    textDim: "#6E6E73",
+    textDimmer: "#AEAEB2",
   },
 };
 
@@ -54,7 +59,7 @@ export function applyTheme(mode = "default") {
   STATUS_COLOR.paid = C.green;
   STATUS_COLOR.pending = C.amber;
   STATUS_COLOR.failed = C.red;
-  CONFIDENCE_COLOR.high = C.red;
+  CONFIDENCE_COLOR.high = C.cyan;
   CONFIDENCE_COLOR.medium = C.amber;
   CONFIDENCE_COLOR.low = C.textDim;
   return palette;
@@ -67,7 +72,7 @@ export const STATUS_COLOR = {
   paid: C.green, pending: C.amber, failed: C.red,
 };
 
-export const CONFIDENCE_COLOR = { high: C.red, medium: C.amber, low: C.textDim };
+export const CONFIDENCE_COLOR = { high: C.cyan, medium: C.amber, low: C.textDim };
 
 // Maps the backend's `stressColorKey` (a plain string, since colors are a
 // frontend styling concern) to an actual token.

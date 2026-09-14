@@ -1,38 +1,51 @@
 /* ------------------------------------------------------------------ */
-/*  GRIDPULSE assistant — optional LLM-backed chat.                    */
-/*  The desktop/macOS build stays fully self-contained: if no API key  */
-/*  is configured the client falls back to its local knowledge base.   */
-/*                                                                      */
-/*  Config (env vars, or passed per-request from the UI so users can   */
-/*  bring their own key without a restart):                            */
-/*    GRIDPULSE_AI_API_KEY   OpenAI-compatible API key                  */
-/*    GRIDPULSE_AI_BASE_URL  default https://api.openai.com/v1          */
-/*    GRIDPULSE_AI_MODEL     default gpt-4o-mini                        */
-/*  Any OpenAI-compatible provider works (OpenAI, Groq, OpenRouter,     */
-/*  Together, Ollama at a custom base URL, …).                          */
-/*                                                                      */
+/*  GRIDPULSE assistant — Pulse.                                       */
+/*                                                                     */
+/*  Default provider is a LOCAL Ollama engine (llama3:latest) on       */
+/*  http://127.0.0.1:11434/v1. ollama.js provisions, starts and        */
+/*  verifies it automatically on first run — no terminal commands, no  */
+/*  API keys, no .env edits. When local AI is active, browser/client-  */
+/*  supplied keys are deliberately ignored (chat.js: the local         */
+/*  configuration is the single source of truth).                      */
+/*                                                                     */
+/*  Cloud mode (legacy) still works for users who prefer an OpenAI-    */
+/*  compatible provider: set GRIDPULSE_AI_PROVIDER=cloud and bring     */
+/*  your own key per-request or via GRIDPULSE_AI_API_KEY.              */
+/*                                                                     */
+/*  Config (env vars):                                                 */
+/*    GRIDPULSE_AI_PROVIDER  ollama (default, auto-local) | cloud | off */
+/*    GRIDPULSE_AI_BASE_URL  cloud only (default https://api.openai.com/v1) */
+/*    GRIDPULSE_AI_MODEL     default llama3:latest (ollama) / gpt-4o-mini (cloud) */
+/*    GRIDPULSE_AI_API_KEY   cloud only                                   */
 /*  PRISM tracing (optional, fire-and-forget):                         */
-/*    PRISMTRACE_HOST       default https://prism.blockconvey.com       */
+/*    PRISMTRACE_HOST       default https://prism.blockconvey.com      */
 /*    PRISMTRACE_PROJECT_ID project UUID                                */
 /*    PRISMTRACE_API_KEY    pt-sk-... key with ingest scope             */
 /* ------------------------------------------------------------------ */
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-4o-mini";
 const EXTERNAL_FALLBACK_NOTE = "Assistant server unavailable — using offline knowledge mode.";
+const ai = require("./ollama");
 
-/* ---- PRISM observability ---- */
-const PRISM_HOST = (process.env.PRISMTRACE_HOST || "https://prism.blockconvey.com").replace(/\/+$/, "");
-const PRISM_PROJECT_ID = process.env.PRISMTRACE_PROJECT_ID || "";
-const PRISM_API_KEY = process.env.PRISMTRACE_API_KEY || "";
+/* ---- PRISM observability (lazy reads so tests can swap env) ---- */
+function prismEnv() {
+  return {
+    host: (process.env.PRISMTRACE_HOST || "https://prism.blockconvey.com").replace(/\/+$/, ""),
+    projectId: process.env.PRISMTRACE_PROJECT_ID || "",
+    apiKey: process.env.PRISMTRACE_API_KEY || "",
+  };
+}
 
 function prismEnabled() {
-  return !!(PRISM_PROJECT_ID && PRISM_API_KEY);
+  const e = prismEnv();
+  return !!(e.projectId && e.apiKey);
 }
 
 async function emitPrismTrace({ inputMessages, outputMessage, model, latencyMs, sessionId, userId, metadata }) {
-  if (!prismEnabled()) return;
+  const e = prismEnv();
+  if (!(e.projectId && e.apiKey)) return;
   const body = {
-    project_id: PRISM_PROJECT_ID,
+    project_id: e.projectId,
     model: model || "unknown",
     input_messages: inputMessages,
     output_message: outputMessage,
@@ -44,11 +57,11 @@ async function emitPrismTrace({ inputMessages, outputMessage, model, latencyMs, 
     metadata: { ...metadata, source: "gridpulse-backend" },
   };
   try {
-    await fetch(`${PRISM_HOST}/api/traces`, {
+    await fetch(`${e.host}/api/traces`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-PRISMtrace-Key": PRISM_API_KEY,
+        "X-PRISMtrace-Key": e.apiKey,
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(5000),
@@ -98,17 +111,32 @@ Behaviour rules:
 - Answer in plain text, concise and warm. Use the real features/facts above — do not invent features, prices, or support contacts.
 - When the user asks about improving the system, give a realistic improvement plan tied to the data and product flow.
 - If asked something unrelated to GRIDPULSE, politely steer back to GRIDPULSE topics.
+- General questions (weather facts, math, definitions, how-to) can be answered directly and helpfully — don't force every answer into a GRIDPULSE framing.
 - Keep answers under ~120 words. Don't use markdown tables or code blocks.
 - The role is provided in the conversation; tailor page/feature references to it.`;
 
+function providerMode() {
+  return String(process.env.GRIDPULSE_AI_PROVIDER || "ollama").trim().toLowerCase();
+}
+
 function effectiveConfig(provided) {
+  const mode = providerMode();
   const p = provided || {};
+  if (mode === "ollama") {
+    return {
+      apiKey: "ollama",
+      baseURL: ai.baseUrl(),
+      model: String(process.env.GRIDPULSE_AI_MODEL || "llama3:latest").trim() || "llama3:latest",
+      provider: "ollama",
+    };
+  }
   const baseURL = (p.baseURL || process.env.GRIDPULSE_AI_BASE_URL || DEFAULT_BASE_URL)
     .toString().trim().replace(/\/+$/, "");
   return {
     apiKey: (p.apiKey || process.env.GRIDPULSE_AI_API_KEY || "").toString().trim(),
     baseURL,
     model: (p.model || process.env.GRIDPULSE_AI_MODEL || DEFAULT_MODEL).toString().trim() || DEFAULT_MODEL,
+    provider: "cloud",
   };
 }
 
@@ -125,27 +153,12 @@ function configured() {
 }
 
 function effectiveModel() {
-  return String(process.env.GRIDPULSE_AI_MODEL || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+  const env = String(process.env.GRIDPULSE_AI_MODEL || "").trim();
+  if (env) return env;
+  return providerMode() === "ollama" ? "llama3:latest" : DEFAULT_MODEL;
 }
 
-async function ask({ message, history, apiKey, baseURL, model, sessionId }) {
-  const cfg = effectiveConfig({ apiKey, baseURL, model });
-
-  /* No LLM key → local knowledge fallback (still traced so PRISM sees
-     real chat volume and can score the fallback even without an AI key). */
-  if (!cfg.apiKey) {
-    const note = "Add an AI provider key to unlock smarter answers.";
-    emitPrismTrace({
-      inputMessages: [{ role: "user", content: String(message).slice(0, 2000) }],
-      outputMessage: note,
-      model: cfg.model,
-      latencyMs: 0,
-      sessionId,
-      metadata: { mode: "local", reason: "no_ai_key" },
-    });
-    return { mode: "local", model: cfg.model, note };
-  }
-
+function buildInputMessages({ message, history }) {
   const inputMessages = [{ role: "system", content: SYSTEM_PROMPT }];
   const recent = (history || []).slice(-8);
   for (const h of recent) {
@@ -155,8 +168,11 @@ async function ask({ message, history, apiKey, baseURL, model, sessionId }) {
     else if (h.from === "bot") inputMessages.push({ role: "assistant", content });
     if (inputMessages.length >= 20) break;
   }
-  inputMessages.push({ role: "user", content: String(message).slice(0, 2000) });
+  inputMessages.push({ role: "user", content: String(message || "").slice(0, 2000) });
+  return inputMessages;
+}
 
+async function runCompletion(cfg, inputMessages) {
   const t0 = Date.now();
   let res;
   try {
@@ -175,66 +191,143 @@ async function ask({ message, history, apiKey, baseURL, model, sessionId }) {
       signal: AbortSignal.timeout(25000),
     });
   } catch (err) {
-    const latencyMs = Date.now() - t0;
+    return { error: "fetch_error", status: 0, latencyMs: Date.now() - t0, reason: String((err && err.message) || err) };
+  }
+  const latencyMs = Date.now() - t0;
+  if (!res.ok) return { error: "provider_error", status: res.status, latencyMs };
+  const data = await res.json().catch(() => null);
+  const reply = data?.choices?.[0]?.message?.content;
+  if (!reply) return { error: "empty_reply", status: res.status, latencyMs };
+  const trimmed = String(reply).trim();
+  if (!trimmed) return { error: "empty_reply", status: res.status, latencyMs };
+  return {
+    reply: trimmed,
+    latencyMs,
+    tokenIn: data?.usage?.prompt_tokens || 0,
+    tokenOut: data?.usage?.completion_tokens || 0,
+  };
+}
+
+function aiNotReadyNote() {
+  const s = ai.status();
+  if (s.phase === "failed" && s.lastError) return `Pulse's local AI needs setup: ${s.lastError}`;
+  if (s.phase === "model_required") return s.message;
+  return `Pulse's local AI is preparing itself (${s.message.toLowerCase()}) — try again in a moment.`;
+}
+
+async function ask({ message, history, apiKey, baseURL, model, sessionId }) {
+  const cfg = effectiveConfig({ apiKey, baseURL, model });
+
+  if (cfg.provider === "ollama") {
+    if (!ai.status().ready) {
+      const note = aiNotReadyNote();
+      emitPrismTrace({
+        inputMessages: [{ role: "user", content: String(message).slice(0, 2000) }],
+        outputMessage: note,
+        model: cfg.model,
+        latencyMs: 0,
+        sessionId,
+        metadata: { mode: "local", provider: "ollama", reason: "ai_not_ready" },
+      });
+      return { mode: "local", model: cfg.model, note };
+    }
+    const inputMessages = buildInputMessages({ message, history });
+    const out = await runCompletion(cfg, inputMessages);
+    if (out.error) {
+      emitPrismTrace({
+        inputMessages: inputMessages.filter((m) => m.role !== "system"),
+        outputMessage: EXTERNAL_FALLBACK_NOTE,
+        model: cfg.model,
+        latencyMs: out.latencyMs || 0,
+        sessionId,
+        metadata: { mode: "local", provider: "ollama", reason: out.error, status: out.status },
+      });
+      return { mode: "local", model: cfg.model, note: EXTERNAL_FALLBACK_NOTE };
+    }
+    emitPrismTrace({
+      inputMessages: inputMessages.filter((m) => m.role !== "system"),
+      outputMessage: out.reply,
+      model: cfg.model,
+      latencyMs: out.latencyMs,
+      sessionId,
+      metadata: { mode: "ai", provider: "ollama", token_in: out.tokenIn, token_out: out.tokenOut },
+    });
+    return { mode: "ai", reply: out.reply, model: cfg.model, provider: "ollama" };
+  }
+
+  /* Cloud provider path (legacy behaviour preserved). */
+  if (!cfg.apiKey) {
+    const note = "Add an AI provider key to unlock smarter answers.";
+    emitPrismTrace({
+      inputMessages: [{ role: "user", content: String(message).slice(0, 2000) }],
+      outputMessage: note,
+      model: cfg.model,
+      latencyMs: 0,
+      sessionId,
+      metadata: { mode: "local", reason: "no_ai_key" },
+    });
+    return { mode: "local", model: cfg.model, note };
+  }
+
+  const inputMessages = buildInputMessages({ message, history });
+  const out = await runCompletion(cfg, inputMessages);
+  if (out.error === "fetch_error") {
     emitPrismTrace({
       inputMessages: [{ role: "user", content: String(message).slice(0, 2000) }],
       outputMessage: EXTERNAL_FALLBACK_NOTE,
       model: cfg.model,
-      latencyMs,
+      latencyMs: out.latencyMs,
       sessionId,
       metadata: { mode: "local", reason: "fetch_error" },
     });
     return { mode: "local", model: cfg.model, note: EXTERNAL_FALLBACK_NOTE };
   }
-
-  if (!res.ok) {
-    const latencyMs = Date.now() - t0;
-    const note = `Assistant provider error (${res.status}) — offline knowledge mode.`;
+  if (out.error === "provider_error") {
+    const note = `Assistant provider error (${out.status}) — offline knowledge mode.`;
     emitPrismTrace({
       inputMessages: [{ role: "user", content: String(message).slice(0, 2000) }],
       outputMessage: note,
       model: cfg.model,
-      latencyMs,
+      latencyMs: out.latencyMs,
       sessionId,
-      metadata: { mode: "local", reason: "provider_error", status: res.status },
+      metadata: { mode: "local", reason: "provider_error", status: out.status },
+    });
+    return { mode: "local", model: cfg.model, note };
+  }
+  if (out.error === "empty_reply") {
+    const note = "Assistant returned no reply — offline knowledge mode.";
+    emitPrismTrace({
+      inputMessages: [{ role: "user", content: String(message).slice(0, 2000) }],
+      outputMessage: note,
+      model: cfg.model,
+      latencyMs: out.latencyMs,
+      sessionId,
+      metadata: { mode: "local", reason: "empty_reply" },
     });
     return { mode: "local", model: cfg.model, note };
   }
 
-  const data = await res.json().catch(() => null);
-  const reply = data?.choices?.[0]?.message?.content;
-  const latencyMs = Date.now() - t0;
-
-  if (!reply) {
-    emitPrismTrace({
-      inputMessages: [{ role: "user", content: String(message).slice(0, 2000) }],
-      outputMessage: "Assistant returned no reply — offline knowledge mode.",
-      model: cfg.model,
-      latencyMs,
-      sessionId,
-      metadata: { mode: "local", reason: "empty_reply" },
-    });
-    return { mode: "local", model: cfg.model, note: "Assistant returned no reply — offline knowledge mode." };
-  }
-
-  const trimmed = String(reply).trim();
-  const tokenIn = data?.usage?.prompt_tokens || 0;
-  const tokenOut = data?.usage?.completion_tokens || 0;
-
   emitPrismTrace({
     inputMessages: inputMessages.filter((m) => m.role !== "system"),
-    outputMessage: trimmed,
+    outputMessage: out.reply,
     model: cfg.model,
-    latencyMs,
+    latencyMs: out.latencyMs,
     sessionId,
-    metadata: { mode: "ai", provider: providerName(cfg.baseURL), token_in: tokenIn, token_out: tokenOut },
+    metadata: { mode: "ai", provider: providerName(cfg.baseURL), token_in: out.tokenIn, token_out: out.tokenOut },
   });
-
-  return { mode: "ai", reply: trimmed, model: cfg.model, provider: providerName(cfg.baseURL) };
+  return { mode: "ai", reply: out.reply, model: cfg.model, provider: providerName(cfg.baseURL) };
 }
 
 function prismHost() {
-  return PRISM_HOST;
+  return prismEnv().host;
 }
 
-module.exports = { ask, configured, effectiveModel, prismEnabled, prismHost };
+module.exports = {
+  ask,
+  configured,
+  effectiveModel,
+  providerMode,
+  prismEnabled,
+  prismHost,
+  emitTrace: emitPrismTrace,
+};

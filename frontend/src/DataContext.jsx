@@ -28,6 +28,31 @@ export function AppDataProvider({ children }) {
   const [liveConnected, setLiveConnected] = useState(false);
   // Dynamic USD -> INR market rate (fed from the live snapshot / /api/fx).
   const [fxRate, setFxRate] = useState(83);
+  // Manual refresh — polls /api/live immediately and re-fetches the
+  // dashboard payloads (they embed the live protocol data server-side).
+  // It also force-reopens the SSE stream so a stale/wedged EventSource can
+  // never freeze the live panels after a manual refresh.
+  const reopenRef = useRef(null);
+
+  const refreshLive = () => {
+    const livePromise = api.getLive().then((snap) => {
+      if (!snap || typeof snap !== "object") return;
+      setLiveConnected(true);
+      setLive(snap);
+      if (snap.fx && Number.isFinite(snap.fx.usdToInr) && snap.fx.usdToInr > 0) {
+        setFxRate(snap.fx.usdToInr);
+      }
+    }).catch(() => setLiveConnected(false));
+    const driverPromise = api.getDriverData().then((driverData) => {
+      if (!driverData || typeof driverData !== "object") return;
+      setDriver({ ...driverData, chargeProfiles: hydrateChargeProfiles(driverData.chargeProfiles) });
+    }).catch(() => {});
+    const ownerPromise = api.getOwnerData().then((ownerData) => {
+      if (ownerData && typeof ownerData === "object") setOwner(ownerData);
+    }).catch(() => {});
+    if (reopenRef.current) reopenRef.current();
+    return Promise.allSettled([livePromise, driverPromise, ownerPromise]);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -45,11 +70,15 @@ export function AppDataProvider({ children }) {
         if (!cancelled) setLoading(false);
       });
 
-    // Subscribe to the live protocol stream. If EventSource is unavailable
-    // (or times out), fall back to a 10s poll of the same snapshot.
+    // Subscribe to the live protocol stream. The EventSource feeds snapshots
+    // in real time; whenever it drops (server restart, network blip) we fall
+    // back to a 10s poll AND keep trying to reopen the stream, so the live
+    // panel can never freeze on a stale snapshot.
     let es = null;
+    let esState = "closed"; // "open" | "connecting" | "closed"
     let pollTimer = null;
-    let esOk = false;
+    let retryTimer = null;
+    let attempt = 0;
 
     const applySnapshot = (snap) => {
       if (cancelled || !snap || typeof snap !== "object") return;
@@ -60,13 +89,69 @@ export function AppDataProvider({ children }) {
       }
     };
 
-    const onFinalFailure = () => {
-      if (cancelled || esOk) return;
+    // Fallback polling that keeps data flowing while the SSE stream is down.
+    const stopPoll = () => {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    };
+    const startPoll = () => {
+      if (pollTimer) return;
       pollTimer = setInterval(() => {
-        api.getLive().then(applySnapshot).catch(() => {});
+        api.getLive().then(applySnapshot).catch(() => setLiveConnected(false));
       }, 10000);
       pollTimer.unref?.();
     };
+
+    const scheduleReconnect = () => {
+      if (cancelled || esState === "open") return;
+      attempt += 1;
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 15000);
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = setTimeout(openStream, delay);
+    };
+
+    const onStreamFail = () => {
+      esState = "closed";
+      setLiveConnected(false);
+      if (es) { try { es.close(); } catch { /* ignore */ } es = null; }
+      startPoll();
+      scheduleReconnect();
+    };
+
+    // Exposed to the manual refresh path: tear down the current stream and
+    // immediately re-connect, so a manual Refresh always ends with a fresh,
+    // open EventSource instead of a wedged one.
+    reopenRef.current = () => {
+      if (es) { try { es.close(); } catch { /* ignore */ } es = null; }
+      esState = "closed";
+      attempt = 0;
+      stopPoll();
+      scheduleReconnect();
+    };
+
+    const openStream = () => {
+      if (cancelled) return;
+      try {
+        esState = "connecting";
+        es = new EventSource(STREAM_URL);
+        es.onopen = () => {
+          esState = "open";
+          attempt = 0;
+          setLiveConnected(true);
+          stopPoll();
+        };
+        es.onmessage = (ev) => {
+          try {
+            applySnapshot(JSON.parse(ev.data));
+          } catch {
+            /* ignore malformed frames */
+          }
+        };
+        es.onerror = () => onStreamFail();
+      } catch {
+        onStreamFail();
+      }
+    };
+    openStream();
 
     // Keep the dynamic USD->INR market rate fresh (also arrives inside live snapshots).
     const refreshFx = () => api.getFx().then((d) => {
@@ -76,44 +161,19 @@ export function AppDataProvider({ children }) {
     const fxTimer = setInterval(refreshFx, 60 * 60 * 1000);
     fxTimer.unref?.();
 
-    const openStream = () => {
-      try {
-        es = new EventSource(STREAM_URL);
-        es.onopen = () => {
-          esOk = true;
-          setLiveConnected(true);
-        };
-        es.onmessage = (ev) => {
-          try {
-            applySnapshot(JSON.parse(ev.data));
-          } catch {
-            /* ignore malformed frames */
-          }
-        };
-        es.onerror = () => {
-          setLiveConnected(false);
-          es.close();
-          es = null;
-          onFinalFailure();
-        };
-      } catch {
-        onFinalFailure();
-      }
-    };
-    openStream();
-    const failGuard = setTimeout(onFinalFailure, 12000);
-
     return () => {
       cancelled = true;
-      clearTimeout(failGuard);
-      if (pollTimer) clearInterval(pollTimer);
-      if (fxTimer) clearInterval(fxTimer);
-      if (es) es.close();
+      stopPoll();
+      if (retryTimer) clearTimeout(retryTimer);
+      clearInterval(fxTimer);
+      if (es) { try { es.close(); } catch { /* ignore */ } es = null; }
+      es = null;
+      reopenRef.current = null;
     };
   }, []);
 
   const value = useMemo(
-    () => ({ driver, owner, live, liveConnected, fxRate, loading, error }),
+    () => ({ driver, owner, live, liveConnected, fxRate, loading, error, refreshLive }),
     [driver, owner, live, liveConnected, fxRate, loading, error]
   );
 
@@ -150,6 +210,6 @@ export function useOwnerData() {
 }
 
 export function useLiveData() {
-  const { live, liveConnected, fxRate } = useAppData();
-  return { live, liveConnected, fxRate };
+  const { live, liveConnected, fxRate, refreshLive } = useAppData();
+  return { live, liveConnected, fxRate, refreshLive };
 }

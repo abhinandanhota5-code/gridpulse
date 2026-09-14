@@ -6,19 +6,21 @@ import {
 import {
   Zap, Battery, AlertTriangle, Wrench, TrendingUp, MapPin, LogOut,
   Gauge, Activity, DollarSign, ShieldAlert, CheckCircle2, Clock, Lock,
-  Building2, Car, ChevronRight, Wifi, User, Plug, Loader2, XCircle,
+  Building2, Car, ChevronRight, ChevronLeft, Wifi, User, Plug, Loader2, XCircle,
   LayoutDashboard, Settings, Timer, Leaf, BarChart3, History, Radio,
   ArrowUpRight, ArrowDownRight, BatteryCharging, Bell, ShieldOff,
   CloudRain, CloudSun, Droplets, Thermometer, Eye, CreditCard, Wallet, Users, Target, Fuel,
   Search, X, ChevronDown, Info, MoreVertical, Download, Share2, Calendar, Filter, Lightbulb, Menu,
   LocateFixed, RefreshCw, Navigation, FileText, Upload, ShieldCheck, BadgeCheck, CalendarDays, ArrowUpDown,
   Sun, Moon, Cloud, CloudFog, CloudSnow, CloudLightning, Wind, Compass,
-  Rocket, MessageCircle, Send, Sparkles, Bot, CircleDot, GitBranch
+  Rocket, Send, Sparkles, CircleDot, GitBranch,
+  Settings2, RotateCcw, Star, Power
 } from "lucide-react";
 
 import { C, STATUS_COLOR, CONFIDENCE_COLOR, applyTheme } from "./theme.js";
 import { useAppData, useDriverData, useOwnerData, useLiveData } from "./DataContext.jsx";
 import { api, API_BASE_URL, wsBaseUrl, PLATE_EVENT_SAMPLE } from "./api.js";
+import { IN_CITIES, IN_CHARGERS, CITY_CENTROID, STATE_LIST, OPERATOR_LIST, CONNECTOR_LIST, chargersNear, matchCity } from "./chargers.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -181,27 +183,40 @@ function exportToCSV(data, filename) {
 }
 function StatusDot({ status }) {
   const color = STATUS_COLOR[status] || C.textDimmer;
-  return <span className="g-dot" style={{ background: color, boxShadow: `0 0 8px ${color}99` }} />;
+  return <span className="g-dot" style={{ background: color, boxShadow: `0 0 8px ${color}99`, "--dotc": color }} />;
 }
 
 function Badge({ status, children }) {
   const color = STATUS_COLOR[status] || C.textDimmer;
   return (
-    <span className="g-badge" style={{ color, borderColor: `${color}55`, background: `${color}18` }}>
+    <span key={status} className="g-badge" style={{ color, borderColor: `${color}55`, background: `${color}18` }}>
       {children}
     </span>
   );
 }
 
-/* Cycles through a list of words with a soft fade/rise — used for the
-   animated hero headline (inspired by festival-site hero treatments). */
-function RotatingWord({ words, interval = 2800 }) {
+/* Cycles through a list of words with a smooth vertical "roulette" slide —
+   the track translates instead of swapping, so transitions never glitch. */
+function RotatingWord({ words, interval = 2600 }) {
   const [index, setIndex] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setIndex((v) => (v + 1) % words.length), interval);
     return () => clearInterval(t);
   }, [words.length, interval]);
-  return <span className="g-window" key={index}>{words[index]}</span>;
+  return (
+    <span className="g-window">
+      <span className="g-window-mask">
+        <span
+          className="g-window-track"
+          style={{ transform: `translateY(calc(-1.25em * ${index}))` }}
+        >
+          {words.map((w) => (
+            <span className="g-window-word" key={w}>{w}</span>
+          ))}
+        </span>
+      </span>
+    </span>
+  );
 }
 
 /* Continuous scrolling text strip with a mask on either edge. */
@@ -313,140 +328,61 @@ function formatKm(km) {
   return `${km.toFixed(1)} km`;
 }
 
-/* ---- Nationwide charging-station + city datasets for trip planning ---- */
-const IN_CITIES = {
-  Delhi: { lat: 28.6139, lng: 77.209, state: "Delhi" },
-  "New Delhi": { lat: 28.6139, lng: 77.209, state: "Delhi" },
-  Mumbai: { lat: 19.076, lng: 72.8777, state: "Maharashtra" },
-  Pune: { lat: 18.5204, lng: 73.8567, state: "Maharashtra" },
-  Nashik: { lat: 19.9975, lng: 73.7898, state: "Maharashtra" },
-  Nagpur: { lat: 21.1458, lng: 79.0882, state: "Maharashtra" },
-  Aurangabad: { lat: 19.8762, lng: 75.3433, state: "Maharashtra" },
-  Bengaluru: { lat: 12.9716, lng: 77.5946, state: "Karnataka" },
-  Mysuru: { lat: 12.2958, lng: 76.6394, state: "Karnataka" },
-  Mangaluru: { lat: 12.9141, lng: 74.856, state: "Karnataka" },
-  Hubballi: { lat: 15.3647, lng: 75.124, state: "Karnataka" },
-  Chennai: { lat: 13.0827, lng: 80.2707, state: "Tamil Nadu" },
-  Coimbatore: { lat: 11.0168, lng: 76.9558, state: "Tamil Nadu" },
-  Vellore: { lat: 12.9165, lng: 79.1325, state: "Tamil Nadu" },
-  Madurai: { lat: 9.9252, lng: 78.1198, state: "Tamil Nadu" },
-  Tiruchirappalli: { lat: 10.7905, lng: 78.7047, state: "Tamil Nadu" },
-  Salem: { lat: 11.6643, lng: 78.146, state: "Tamil Nadu" },
-  Hyderabad: { lat: 17.385, lng: 78.4867, state: "Telangana" },
-  Warangal: { lat: 17.9689, lng: 79.5941, state: "Telangana" },
-  Jaipur: { lat: 26.9124, lng: 75.7873, state: "Rajasthan" },
-  Jodhpur: { lat: 26.2389, lng: 73.0243, state: "Rajasthan" },
-  Udaipur: { lat: 24.5854, lng: 73.7125, state: "Rajasthan" },
-  Ahmedabad: { lat: 23.0225, lng: 72.5714, state: "Gujarat" },
-  Surat: { lat: 21.1702, lng: 72.8311, state: "Gujarat" },
-  Vadodara: { lat: 22.3072, lng: 73.1812, state: "Gujarat" },
-  Rajkot: { lat: 22.3039, lng: 70.8022, state: "Gujarat" },
-  Kolkata: { lat: 22.5726, lng: 88.3639, state: "West Bengal" },
-  Siliguri: { lat: 26.7271, lng: 88.3953, state: "West Bengal" },
-  Guwahati: { lat: 26.1445, lng: 91.7362, state: "Assam" },
-  Chandigarh: { lat: 30.7333, lng: 76.7794, state: "Chandigarh" },
-  Amritsar: { lat: 31.634, lng: 74.8723, state: "Punjab" },
-  Ludhiana: { lat: 30.901, lng: 75.8573, state: "Punjab" },
-  Lucknow: { lat: 26.8467, lng: 80.9462, state: "Uttar Pradesh" },
-  Kanpur: { lat: 26.4499, lng: 80.3319, state: "Uttar Pradesh" },
-  Agra: { lat: 27.1767, lng: 78.0081, state: "Uttar Pradesh" },
-  Varanasi: { lat: 25.3176, lng: 82.9739, state: "Uttar Pradesh" },
-  Noida: { lat: 28.5355, lng: 77.391, state: "Uttar Pradesh" },
-  Ghaziabad: { lat: 28.6692, lng: 77.4538, state: "Uttar Pradesh" },
-  Indore: { lat: 22.7196, lng: 75.8577, state: "Madhya Pradesh" },
-  Bhopal: { lat: 23.2599, lng: 77.4126, state: "Madhya Pradesh" },
-  Patna: { lat: 25.5941, lng: 85.1376, state: "Bihar" },
-  Ranchi: { lat: 23.3441, lng: 85.3096, state: "Jharkhand" },
-  Bhubaneswar: { lat: 20.2961, lng: 85.8245, state: "Odisha" },
-  Cuttack: { lat: 20.4625, lng: 85.8828, state: "Odisha" },
-  Visakhapatnam: { lat: 17.6868, lng: 83.2185, state: "Andhra Pradesh" },
-  Vijayawada: { lat: 16.5062, lng: 80.648, state: "Andhra Pradesh" },
-  Tirupati: { lat: 13.6288, lng: 79.4192, state: "Andhra Pradesh" },
-  Kochi: { lat: 9.9312, lng: 76.2673, state: "Kerala" },
-  Thiruvananthapuram: { lat: 8.5241, lng: 76.9366, state: "Kerala" },
-  Kozhikode: { lat: 11.2588, lng: 75.7804, state: "Kerala" },
-  Goa: { lat: 15.2993, lng: 74.124, state: "Goa" },
-};
+/* iOS-style ease-out count-up for live stats (respects reduced motion). */
+function AnimatedNumber({ value, format, duration = 550, className }) {
+  const [display, setDisplay] = useState(Number(value) || 0);
+  const prevRef = useRef(Number(value) || 0);
+  const rafRef = useRef(null);
+  const toNum = Number(value) || 0;
+  useEffect(() => {
+    const from = prevRef.current;
+    if (from === toNum) return;
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setDisplay(toNum);
+      prevRef.current = toNum;
+      return;
+    }
+    const t0 = performance.now();
+    const ease = (t) => 1 - Math.pow(1 - t, 3);
+    const tick = (now) => {
+      const p = Math.min(1, (now - t0) / duration);
+      setDisplay(from + (toNum - from) * ease(p));
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+      else prevRef.current = toNum;
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [toNum, duration]);
 
-/* ~120 real charging sites across Indian cities + NH corridors */
-const IN_CHARGERS = [
-  { id: "NL-DL-01", name: "Tata Power · Aerocity, Delhi", city: "Delhi", state: "Delhi", lat: 28.5562, lng: 77.1, power: "50 kW", plugs: "CCS2 ×2 · Type2 ×1", operator: "Tata Power" },
-  { id: "NL-DL-02", name: "Charging Point India · Connaught Place", city: "Delhi", state: "Delhi", lat: 28.6328, lng: 77.2197, power: "60 kW", plugs: "CCS2 ×2", operator: "Charzer" },
-  { id: "NL-DL-03", name: "Statiq · Saket", city: "Delhi", state: "Delhi", lat: 28.5245, lng: 77.2067, power: "25 kW", plugs: "CCS2 ×4", operator: "Statiq" },
-  { id: "NL-DL-04", name: "Zeon Charging · Dwarka", city: "Delhi", state: "Delhi", lat: 28.5921, lng: 77.046, power: "50 kW", plugs: "CCS2 ×2", operator: "Zeon" },
-  { id: "NL-DL-05", name: "BPCL · Ring Road Qutab", city: "Delhi", state: "Delhi", lat: 28.5574, lng: 77.1944, power: "50 kW", plugs: "CCS2 ×1", operator: "BPCL" },
-  { id: "NL-UP-01", name: "Tata Power · Noida Sector 62", city: "Noida", state: "Uttar Pradesh", lat: 28.6183, lng: 77.3598, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-UP-02", name: "Tata Power · Ghaziabad NH-9", city: "Ghaziabad", state: "Uttar Pradesh", lat: 28.6771, lng: 77.5079, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-UP-03", name: "MGL E-Mobility · Agra NH-44", city: "Agra", state: "Uttar Pradesh", lat: 27.1993, lng: 78.065, power: "60 kW", plugs: "CCS2 ×2", operator: "MGL" },
-  { id: "NL-UP-04", name: "HP Gas · Lucknow NH-27", city: "Lucknow", state: "Uttar Pradesh", lat: 26.8714, lng: 80.9913, power: "25 kW", plugs: "CCS2 ×1", operator: "HPCL" },
-  { id: "NL-UP-05", name: "Fortum · Kanpur", city: "Kanpur", state: "Uttar Pradesh", lat: 26.4499, lng: 80.28, power: "25 kW", plugs: "CCS2 ×1", operator: "Fortum" },
-  { id: "NL-DL-06", name: "Tata Power · Yamuna Expressway", city: "Noida", state: "Uttar Pradesh", lat: 28.4521, lng: 77.6201, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-DL-07", name: "Adani Total · Faridabad NH-44", city: "Delhi", state: "Delhi", lat: 28.4089, lng: 77.3178, power: "120 kW", plugs: "CCS2 ×2", operator: "Adani Total" },
-  { id: "NL-HR-01", name: "Tata Power · Gurugram Cyber Hub", city: "Gurugram", state: "Haryana", lat: 28.4954, lng: 77.0883, power: "60 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-HR-02", name: "Statiq · Manesar NH-48", city: "Gurugram", state: "Haryana", lat: 28.3768, lng: 76.9346, power: "25 kW", plugs: "Type2 ×2", operator: "Statiq" },
-  { id: "NL-HR-03", name: "Statiq · Panipat NH-44", city: "Rohtak", state: "Haryana", lat: 29.3909, lng: 76.9635, power: "25 kW", plugs: "CCS2 ×1", operator: "Statiq" },
-  { id: "NL-CH-01", name: "Tata Power · Chandigarh Sector 17", city: "Chandigarh", state: "Chandigarh", lat: 30.7382, lng: 76.7864, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-PB-01", name: "Panipat Energy · Ludhiana", city: "Ludhiana", state: "Punjab", lat: 30.93, lng: 75.75, power: "22 kW", plugs: "Type2 ×2", operator: "Other" },
-  { id: "NL-PB-02", name: "HP Gas · Amritsar NH-44", city: "Amritsar", state: "Punjab", lat: 31.647, lng: 74.86, power: "25 kW", plugs: "CCS2 ×1", operator: "HPCL" },
-  { id: "NL-RJ-01", name: "Tata Power · Jaipur C-Scheme", city: "Jaipur", state: "Rajasthan", lat: 26.9124, lng: 75.82, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-RJ-02", name: "BPCL · Delhi–Jaipur NH-48", city: "Jaipur", state: "Rajasthan", lat: 27.4, lng: 76.1, power: "60 kW", plugs: "CCS2 ×2", operator: "BPCL" },
-  { id: "NL-RJ-03", name: "Zeon · Udaipur", city: "Udaipur", state: "Rajasthan", lat: 24.5854, lng: 73.733, power: "50 kW", plugs: "CCS2 ×1", operator: "Zeon" },
-  { id: "NL-RJ-04", name: "Fortum · Jodhpur NH-62", city: "Jodhpur", state: "Rajasthan", lat: 26.2537, lng: 73.07, power: "25 kW", plugs: "CCS2 ×1", operator: "Fortum" },
-  { id: "NL-GJ-01", name: "Tata Power · Ahmedabad SG Highway", city: "Ahmedabad", state: "Gujarat", lat: 23.0298, lng: 72.5262, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-GJ-02", name: "Tata Power · Vadodara NH-48", city: "Vadodara", state: "Gujarat", lat: 22.3, lng: 73.2, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-GJ-03", name: "Adani Total · Surat NH-48", city: "Surat", state: "Gujarat", lat: 21.17, lng: 72.83, power: "60 kW", plugs: "CCS2 ×2", operator: "Adani Total" },
-  { id: "NL-GJ-04", name: "Statiq · Rajkot", city: "Rajkot", state: "Gujarat", lat: 22.28, lng: 70.79, power: "25 kW", plugs: "CCS2 ×1", operator: "Statiq" },
-  { id: "NL-GJ-05", name: "Zeon · Gandhinagar", city: "Ahmedabad", state: "Gujarat", lat: 23.2226, lng: 72.6496, power: "50 kW", plugs: "CCS2 ×1", operator: "Zeon" },
-  { id: "NL-MH-01", name: "Tata Power · Bandra East, Mumbai", city: "Mumbai", state: "Maharashtra", lat: 19.065, lng: 72.84, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-MH-02", name: "Adani Total · BKC Mumbai", city: "Mumbai", state: "Maharashtra", lat: 19.0581, lng: 72.8686, power: "120 kW", plugs: "CCS2 ×2", operator: "Adani Total" },
-  { id: "NL-MH-03", name: "Zeon · Pune FC Road", city: "Pune", state: "Maharashtra", lat: 18.5562, lng: 73.8441, power: "60 kW", plugs: "CCS2 ×2", operator: "Zeon" },
-  { id: "NL-MH-04", name: "Tata Power · Pune Hinjewadi", city: "Pune", state: "Maharashtra", lat: 18.5973, lng: 73.6826, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-MH-05", name: "Statiq · Mumbai–Pune NH-48", city: "Pune", state: "Maharashtra", lat: 18.82, lng: 73.3, power: "25 kW", plugs: "CCS2 ×1", operator: "Statiq" },
-  { id: "NL-MH-06", name: "HP Gas · Nashik NH-3", city: "Nashik", state: "Maharashtra", lat: 19.97, lng: 73.75, power: "25 kW", plugs: "CCS2 ×1", operator: "HPCL" },
-  { id: "NL-MH-07", name: "Fortum · Nagpur NH-53", city: "Nagpur", state: "Maharashtra", lat: 21.12, lng: 79.14, power: "50 kW", plugs: "CCS2 ×1", operator: "Fortum" },
-  { id: "NL-MH-08", name: "Tata Power · Chhatrapati Sambhajinagar", city: "Aurangabad", state: "Maharashtra", lat: 19.8762, lng: 75.32, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-KA-01", name: "Tata Power · Indiranagar Bengaluru", city: "Bengaluru", state: "Karnataka", lat: 12.9716, lng: 77.64, power: "60 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-KA-02", name: "Statiq · Whitefield Bengaluru", city: "Bengaluru", state: "Karnataka", lat: 12.9707, lng: 77.7506, power: "25 kW", plugs: "Type2 ×4", operator: "Statiq" },
-  { id: "NL-KA-03", name: "Zeon · Electronic City", city: "Bengaluru", state: "Karnataka", lat: 12.8452, lng: 77.6602, power: "50 kW", plugs: "CCS2 ×1", operator: "Zeon" },
-  { id: "NL-KA-04", name: "Mall of Mysore · Mysuru", city: "Mysuru", state: "Karnataka", lat: 12.30, lng: 76.65, power: "22 kW", plugs: "Type2 ×2", operator: "Other" },
-  { id: "NL-KA-05", name: "Mangaluru Smart City · Mangaluru", city: "Mangaluru", state: "Karnataka", lat: 12.9141, lng: 74.856, power: "25 kW", plugs: "CCS2 ×1", operator: "Other" },
-  { id: "NL-KA-06", name: "Tata Power · Hubballi NH-48", city: "Hubballi", state: "Karnataka", lat: 15.3647, lng: 75.124, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-KA-07", name: "Adani Total · NH-75 Bengaluru–Hyderabad", city: "Bengaluru", state: "Karnataka", lat: 13.6, lng: 77.6, power: "60 kW", plugs: "CCS2 ×2", operator: "Adani Total" },
-  { id: "NL-TN-01", name: "Tata Power · T Nagar Chennai", city: "Chennai", state: "Tamil Nadu", lat: 13.0418, lng: 80.2341, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-TN-02", name: "Switch Mobility · Chennai–Bengaluru NH-48", city: "Chennai", state: "Tamil Nadu", lat: 13.0, lng: 80.0, power: "60 kW", plugs: "CCS2 ×2", operator: "Other" },
-  { id: "NL-TN-03", name: "GRIDPULSE · Vellore Tech Park", city: "Vellore", state: "Tamil Nadu", lat: 12.9165, lng: 79.1325, power: "60 kW", plugs: "CCS2 ×2", operator: "GRIDPULSE" },
-  { id: "NL-TN-04", name: "GRIDPULSE · Katpadi Junction", city: "Vellore", state: "Tamil Nadu", lat: 12.97, lng: 79.14, power: "60 kW", plugs: "CCS2 ×2", operator: "GRIDPULSE" },
-  { id: "NL-TN-05", name: "GRIDPULSE · Anna Nagar Hub", city: "Chennai", state: "Tamil Nadu", lat: 13.0878, lng: 80.2101, power: "120 kW", plugs: "CCS2 ×2", operator: "GRIDPULSE" },
-  { id: "NL-TN-06", name: "Tata Power · Coimbatore", city: "Coimbatore", state: "Tamil Nadu", lat: 11.0168, lng: 76.9558, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-TN-07", name: "Statiq · Madurai NH-44", city: "Madurai", state: "Tamil Nadu", lat: 9.93, lng: 78.12, power: "25 kW", plugs: "CCS2 ×1", operator: "Statiq" },
-  { id: "NL-TN-08", name: "Fortum · Tiruchirappalli", city: "Tiruchirappalli", state: "Tamil Nadu", lat: 10.79, lng: 78.70, power: "50 kW", plugs: "CCS2 ×1", operator: "Fortum" },
-  { id: "NL-TN-09", name: "Zeon · Salem NH-44", city: "Salem", state: "Tamil Nadu", lat: 11.66, lng: 78.15, power: "25 kW", plugs: "CCS2 ×1", operator: "Zeon" },
-  { id: "NL-TN-10", name: "Tata Power · Chennai Bypass", city: "Chennai", state: "Tamil Nadu", lat: 13.03, lng: 80.24, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-AP-01", name: "Tata Power · Vijayawada NH-16", city: "Vijayawada", state: "Andhra Pradesh", lat: 16.50, lng: 80.61, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-AP-02", name: "Fortum · Visakhapatnam", city: "Visakhapatnam", state: "Andhra Pradesh", lat: 17.70, lng: 83.21, power: "50 kW", plugs: "CCS2 ×1", operator: "Fortum" },
-  { id: "NL-AP-03", name: "Tata Power · Tirupati NH-71", city: "Tirupati", state: "Andhra Pradesh", lat: 13.63, lng: 79.42, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-AP-04", name: "Adani Total · NH-16 Nellore", city: "Nellore", state: "Andhra Pradesh", lat: 14.44, lng: 79.99, power: "60 kW", plugs: "CCS2 ×1", operator: "Adani Total" },
-  { id: "NL-TS-01", name: "Tata Power · Banjara Hills Hyderabad", city: "Hyderabad", state: "Telangana", lat: 17.4156, lng: 78.4347, power: "60 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-TS-02", name: "Switch Mobility · Hyderabad–Bengaluru NH-44", city: "Hyderabad", state: "Telangana", lat: 17.2, lng: 78.3, power: "50 kW", plugs: "CCS2 ×1", operator: "Other" },
-  { id: "NL-TS-03", name: "Zeon · Warangal", city: "Warangal", state: "Telangana", lat: 17.97, lng: 79.60, power: "25 kW", plugs: "CCS2 ×1", operator: "Zeon" },
-  { id: "NL-WB-01", name: "Tata Power · Salt Lake Kolkata", city: "Kolkata", state: "West Bengal", lat: 22.5845, lng: 88.4027, power: "60 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-WB-02", name: "Fortum · Kolkata NH-12", city: "Kolkata", state: "West Bengal", lat: 22.60, lng: 88.30, power: "25 kW", plugs: "CCS2 ×1", operator: "Fortum" },
-  { id: "NL-WB-03", name: "Girnar · Siliguri NH-27", city: "Siliguri", state: "West Bengal", lat: 26.72, lng: 88.40, power: "50 kW", plugs: "CCS2 ×1", operator: "Other" },
-  { id: "NL-AS-01", name: "Tata Power · Guwahati NH-27", city: "Guwahati", state: "Assam", lat: 26.14, lng: 91.70, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-OR-01", name: "Statiq · Bhubaneswar", city: "Bhubaneswar", state: "Odisha", lat: 20.2961, lng: 85.8245, power: "25 kW", plugs: "CCS2 ×1", operator: "Statiq" },
-  { id: "NL-OR-02", name: "Fortum · Cuttack NH-16", city: "Cuttack", state: "Odisha", lat: 20.46, lng: 85.88, power: "25 kW", plugs: "CCS2 ×1", operator: "Fortum" },
-  { id: "NL-MP-01", name: "Tata Power · Indore", city: "Indore", state: "Madhya Pradesh", lat: 22.70, lng: 75.86, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-MP-02", name: "Statiq · Bhopal NH-12", city: "Bhopal", state: "Madhya Pradesh", lat: 23.26, lng: 77.41, power: "25 kW", plugs: "CCS2 ×1", operator: "Statiq" },
-  { id: "NL-MP-03", name: "Tata Power · Delhi–Indore NH-46", city: "Indore", state: "Madhya Pradesh", lat: 24.1, lng: 77.3, power: "60 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-  { id: "NL-KL-01", name: "Tata Power · Kochi Marine Drive", city: "Kochi", state: "Kerala", lat: 9.9816, lng: 76.2757, power: "50 kW", plugs: "CCS2 ×2", operator: "Tata Power" },
-  { id: "NL-KL-02", name: "Fortum · Thiruvananthapuram NH-66", city: "Thiruvananthapuram", state: "Kerala", lat: 8.48, lng: 76.95, power: "50 kW", plugs: "CCS2 ×1", operator: "Fortum" },
-  { id: "NL-KL-03", name: "Zeon · Kozhikode NH-66", city: "Kozhikode", state: "Kerala", lat: 11.26, lng: 75.78, power: "50 kW", plugs: "CCS2 ×1", operator: "Zeon" },
-  { id: "NL-GA-01", name: "Statiq · Panaji Goa", city: "Goa", state: "Goa", lat: 15.49, lng: 73.82, power: "25 kW", plugs: "CCS2 ×1", operator: "Statiq" },
-  { id: "NL-GA-02", name: "Zeon · Goa NH-66", city: "Goa", state: "Goa", lat: 15.32, lng: 73.99, power: "50 kW", plugs: "CCS2 ×1", operator: "Zeon" },
-  { id: "NL-JH-01", name: "Statiq · Ranchi NH-33", city: "Ranchi", state: "Jharkhand", lat: 23.34, lng: 85.33, power: "25 kW", plugs: "CCS2 ×1", operator: "Statiq" },
-  { id: "NL-BR-01", name: "Tata Power · Patna NH-30", city: "Patna", state: "Bihar", lat: 25.60, lng: 85.10, power: "50 kW", plugs: "CCS2 ×1", operator: "Tata Power" },
-];
+  return <span className={className}>{format ? format(display) : Math.round(display)}</span>;
+}
 
+/* Fetch a road route (with geometry) for the map through the backend OSRM
+   proxy; falls back gracefully to a straight line when offline. Returns
+   { route, durationMin, distanceKm, loading }. */
+function useRoute(origin, dest) {
+  const [state, setState] = useState({ route: null, loading: false });
+  useEffect(() => {
+    if (!origin || !dest) {
+      setState({ route: null, loading: false });
+      return;
+    }
+    let cancelled = false;
+    setState({ route: null, loading: true });
+    api.getRoute(origin.lat, origin.lng, dest.lat, dest.lng)
+      .then((d) => {
+        if (cancelled || !d || !Array.isArray(d.positions) || d.positions.length < 2) return;
+        setState({ route: { positions: d.positions, straight: !!d.straight }, distanceKm: d.distanceKm, durationMin: d.durationMin, loading: false });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ route: null, loading: false });
+      });
+    return () => { cancelled = true; };
+  }, [origin?.lat, origin?.lng, dest?.lat, dest?.lng]);
+  return state;
+}
+
+/* ---- Nationwide charging-station + city datasets live in ./chargers.js ---- */
 /* ---- Trip planner: greedy stop selection along the straight-line route ---- */
 function planEVRoadTrip({ origin, destination, stationList, vehicleSpec, startSoc = 85, fxRate = 83 }) {
   const usable = parseFloat(vehicleSpec?.usable) || 38;
@@ -884,9 +820,10 @@ function Kpi({ label, value, sub, icon: Icon, accent, trend }) {
 function ChartTooltip({ active, payload, label, unit }) {
   if (!active || !payload || !payload.length) return null;
   return (
-    <div style={{
+    <div key={label} className="g-chart-tip" style={{
       background: C.panelSolid, border: `1px solid ${C.border}`, borderRadius: 8,
       padding: "8px 12px", fontSize: 12, color: C.text, fontFamily: "var(--mono)",
+      boxShadow: "0 6px 18px rgba(0,0,0,.35)",
     }}>
       <div style={{ color: C.textDim, marginBottom: 2 }}>{label}</div>
       {payload.map((p, i) => (
@@ -896,11 +833,155 @@ function ChartTooltip({ active, payload, label, unit }) {
   );
 }
 
+/* Toast-style confirmation for one-shot actions (ticket raised, scheduled…).
+   Auto-dismisses after a few seconds so it never lingers or crowds the page. */
+function ActionFeedback({ message, onDismiss }) {
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(onDismiss, 6000);
+    return () => clearTimeout(t);
+  }, [message, onDismiss]);
+  if (!message) return null;
+  return (
+    <div className="g-insight g-action-feedback" role="status">
+      <CheckCircle2 size={14} style={{ color: C.green, flexShrink: 0, marginTop: 2 }} />
+      <span>{message}</span>
+      <button type="button" className="g-feedback-dismiss" onClick={onDismiss} title="Dismiss">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  iOS-style pull-to-refresh: drag down at the top of the page while  */
+/*  the page is scrolled to 0. The GRIDPULSE mark stretches + rotates  */
+/*  with the drag, snaps, then spins while the page re-mounts.         */
+/* ------------------------------------------------------------------ */
+function PullToRefresh({ onRefresh, children }) {
+  const rootRef = useRef(null);
+  const [pullPx, setPullPx] = useState(0);
+  const [phase, setPhase] = useState("idle"); // idle | ready | refreshing
+  const [spinTick, setSpinTick] = useState(0);
+  const watchRef = useRef(false);
+  const startYRef = useRef(0);
+  const pxRef = useRef(0);
+  const phaseRef = useRef("idle");
+  const TH = 74;
+  const FACTOR = 0.48;
+
+  const setPx = (v) => { pxRef.current = v; setPullPx(v); };
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+
+    const atTop = () => {
+      const sc = document.scrollingElement || document.documentElement;
+      return sc.scrollTop <= 0 && window.scrollY <= 0;
+    };
+
+    const onStart = (e) => {
+      if (phaseRef.current === "refreshing") return;
+      if (!atTop()) return;
+      const t = e.touches && e.touches[0];
+      if (!t) return;
+      startYRef.current = t.clientY;
+      watchRef.current = true;
+    };
+
+    const onMove = (e) => {
+      if (!watchRef.current || phaseRef.current !== "idle") return;
+      if (e.touches && e.touches.length > 1) return;
+      const t = e.touches[0];
+      const dy = t.clientY - startYRef.current;
+      if (dy <= 0) { watchRef.current = false; setPx(0); return; }
+      if (!atTop()) { watchRef.current = false; setPx(0); return; }
+      if (e.cancelable) e.preventDefault();
+      const px = Math.min(dy * FACTOR, TH + 30);
+      setPx(px);
+      if (px >= TH && phaseRef.current !== "ready") { phaseRef.current = "ready"; setPhase("ready"); }
+      else if (px < TH && phaseRef.current === "ready") { phaseRef.current = "idle"; setPhase("idle"); }
+    };
+
+    const onEnd = () => {
+      if (!watchRef.current) return;
+      watchRef.current = false;
+      if (phaseRef.current === "ready") {
+        phaseRef.current = "refreshing";
+        setPhase("refreshing");
+        setSpinTick((v) => v + 1);
+        const done = onRefresh ? onRefresh() : null;
+        const settle = () => { phaseRef.current = "idle"; setPhase("idle"); setPx(0); };
+        if (done && typeof done.then === "function") Promise.resolve(done).then(settle, settle);
+        else setTimeout(settle, 850);
+      } else {
+        phaseRef.current = "idle"; setPhase("idle"); setPx(0);
+      }
+    };
+
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd, { passive: true });
+    el.addEventListener("touchcancel", onEnd, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", onEnd);
+    };
+  }, [onRefresh]);
+
+  const ratio = Math.min(pullPx / TH, 1);
+  const onscreen = pullPx > 4 || phase !== "idle";
+  return (
+    <div className="g-pull-root" ref={rootRef}>
+      <div
+        className={`g-ptr${onscreen ? " onscreen" : ""}`}
+        style={{ transform: `translate(-50%, ${Math.min(pullPx, TH + 12) * 0.5 - 8}px)` }}
+      >
+        <div
+          key={spinTick}
+          className={`g-ptr-logo${phase === "refreshing" ? " busy" : ""}`}
+          style={{
+            opacity: 0.35 + ratio * 0.65,
+            transform: phase === "refreshing"
+              ? "none"
+              : `rotate(${(pullPx * 2.3).toFixed(1)}deg) scale(${(0.78 + ratio * 0.22).toFixed(3)})`,
+          }}
+        >
+          <Zap size={20} fill="currentColor" />
+        </div>
+        {phase === "ready" ? <div className="g-ptr-text">Release to refresh</div>
+          : phase === "refreshing" ? <div className="g-ptr-text">Refreshing…</div> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const CHART_ACTIVE_DOT = { r: 6, strokeWidth: 0, fill: C.cyan, stroke: C.cyan, className: "g-chart-active-dot" };
+const CHART_ACTIVE_GREEN = { r: 6, strokeWidth: 0, fill: C.green, stroke: C.green, className: "g-chart-active-dot" };
+const CHART_ACTIVE_AMBER = { r: 6, strokeWidth: 0, fill: C.amber, stroke: C.amber, className: "g-chart-active-dot" };
+const CHART_LINE_CURSOR = { stroke: C.cyan, strokeWidth: 1, strokeDasharray: "3 3" };
+const CHART_CURSOR_AMBER = { stroke: C.amber, strokeWidth: 1, strokeDasharray: "3 3" };
+
 /* ---------------------------------------------------------------- */
 /*  Sidebar navigation — shared by both dashboards                   */
 /* ---------------------------------------------------------------- */
 function Sidebar({ items, active, onSelect, bottom }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("gp_sidebar_collapsed") === "1"; } catch { return false; }
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try { localStorage.setItem("gp_sidebar_collapsed", next ? "1" : "0"); } catch { /* storage unavailable */ }
+      return next;
+    });
+  };
 
   return (
     <>
@@ -911,13 +992,23 @@ function Sidebar({ items, active, onSelect, bottom }) {
         {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
       
-      <aside className={`g-sidebar ${isMobileMenuOpen ? 'g-sidebar-mobile-open' : ''}`}>
+      <aside className={`g-sidebar ${isMobileMenuOpen ? 'g-sidebar-mobile-open' : ''} ${collapsed ? 'g-sidebar-collapsed' : ''}`}>
+        <button
+          type="button"
+          className="g-sidebar-collapse-btn"
+          onClick={toggleCollapsed}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+        </button>
         <nav className="g-sidebar-nav">
           {items.map((it) => (
             <button
               key={it.key}
               type="button"
               className={`g-sidebar-link ${active === it.key ? "active" : ""}`}
+              title={collapsed ? it.label : undefined}
               onClick={() => {
                 onSelect(it.key);
                 setIsMobileMenuOpen(false);
@@ -1192,17 +1283,16 @@ function LoginScreen({ onLogin, minimalMode, onToggleMinimal }) {
             <Zap size={18} style={{ color: C.cyan }} />
             <span>GRIDPULSE</span>
           </div>
-          <button type="button" className="g-minimal-toggle" onClick={onToggleMinimal}>
+          <button type="button" className="g-minimal-toggle" onClick={onToggleMinimal} title="Toggle NothingOS theme">
             {minimalMode ? <Sun size={14} /> : <Moon size={14} />}
-            {minimalMode ? "Premium" : "Minimal"}
+            {minimalMode ? "Light" : "Dark"}
           </button>
         </div>
         <h1 className="g-login-headline">
           EV charging, tuned to the{" "}
           <span className="g-grad-text">
-            <RotatingWord words={["live grid", "clean energy", "demand signals", "hour-ahead decisions"]} />
+            <RotatingWord words={["live grid.", "clean energy.", "demand signals.", "hour-ahead decisions."]} />
           </span>
-          .
         </h1>
         <p className="g-login-sub">
           GRIDPULSE brings together charging behavior, live telemetry, and network
@@ -1438,81 +1528,132 @@ function HelpModal({ isOpen, onClose }) {
 /* ---------------------------------------------------------------- */
 /*  Search Component                                                 */
 /* ---------------------------------------------------------------- */
-function SearchResults({ query, results, onClose, onSelectResult }) {
-  if (!query || query.length < 2) return null;
+/* Wraps the matched query substring in a <mark> so Spotlight rows highlight hits. */
+function highlightQuery(text, query) {
+  if (!text || !query) return text;
+  const str = String(text);
+  const lowerText = str.toLowerCase();
+  const lowerQuery = String(query).toLowerCase();
+  const tokens = lowerQuery.split(/\s+/).filter(Boolean);
+  let out = [];
+  let cursor = 0;
+  tokens.forEach((tok) => {
+    const idx = lowerText.indexOf(tok, cursor);
+    if (idx === -1) return;
+    if (idx > cursor) out.push(str.slice(cursor, idx));
+    out.push(<mark key={idx + ":" + tok} className="g-search-highlight">{str.slice(idx, idx + tok.length)}</mark>);
+    cursor = idx + tok.length;
+  });
+  if (cursor < str.length) out.push(str.slice(cursor));
+  return out.length > 1 ? out : str;
+}
 
-  const groupedResults = {
-    dashboards: results.filter(r => r.type === 'dashboard'),
-    chargers: results.filter(r => r.type === 'charger'),
-    data: results.filter(r => r.type === 'data'),
-  };
+/* Lightweight relevance scoring so Spotlight favours prefix + exact matches. */
+const spotlightScore = (entry, tokens) => {
+  const hay = `${entry.title} ${entry.sub || ""} ${entry.group || ""} ${entry.keyword || ""}`.toLowerCase();
+  let score = 0;
+  for (const tok of tokens) {
+    if (hay.startsWith(tok)) score += 5;
+    else if (hay.includes(tok)) score += tokens.length === 1 ? 3 : 2;
+    else return 0;
+    if (entry.title.toLowerCase().startsWith(tok)) score += 2;
+    if (entry.title.toLowerCase() === tok) score += 3;
+  }
+  return score;
+};
 
-  const hasResults = Object.values(groupedResults).some(group => group.length > 0);
+/* Siri AI aurora palette — Apple-Intelligence glow (violet → cyan → teal → pink). */
+const SIRI_AURORA = "linear-gradient(135deg, #8E7CF0 0%, #5AC8FA 38%, #34C7C2 62%, #FF6EA6 100%)";
+const SIRI_VIOLET = "#8E7CF0";
+
+/* Natural-language intents: answer question-style queries like "nearest ev
+   station" or "how much is my bill" with targeted results. Shared by both
+   dashboards; each builds its own entries via `builder(role, ctx)`. */
+const SEARCH_INTENTS = [
+  { patterns: ["nearest", "nearby", "near me", "near ", "where .*charge", "find .*charg", "station", "charger"], kind: "chargers" },
+  { patterns: ["bill", "how much", "cost", "spend", "price", "charged me", "money"], kind: "bill" },
+  { patterns: ["battery", "health", "degrad", "soh", "capacity", "state of charge", "soc"], kind: "battery" },
+  { patterns: ["alert", "anomal", "fault", "notif", "warn", "issue"], kind: "alerts" },
+  { patterns: ["ocpp", "gateway", "protocol", "websocket", "modbus", "openadr", "anpr", "volttron"], kind: "gateway" },
+  { patterns: ["theft", "tamper", "tap", "fraud", "stolen", "anpr"], kind: "theft" },
+  { patterns: ["grid", "energy", "load", "solar", "demand", "power", "peak"], kind: "grid" },
+  { patterns: ["schedule", "planner", "plan", "when to charge", "time to charge"], kind: "planner" },
+  { patterns: ["range", "how far", "drive"], kind: "range" },
+  { patterns: ["roadmap", "upcoming", "feature", "new thing", "releases"], kind: "roadmap" },
+  { patterns: ["settings", "preference", "currency", "region", "theme", "config"], kind: "settings" },
+  { patterns: ["history", "sessions", "past", "last week", "journal"], kind: "history" },
+  { patterns: ["insight", "predict", "forecast", "trend", "future"], kind: "insights" },
+  { patterns: ["demo", "account", "login", "password", "sign in"], kind: "accounts" },
+];
+function matchSearchIntents(q) {
+  const lq = q.toLowerCase();
+  const matched = [];
+  for (const intent of SEARCH_INTENTS) {
+    if (intent.patterns.some((p) => lq.includes(p) || (p.endsWith(" ") && lq.includes(p)))) matched.push(intent.kind);
+  }
+  return matched;
+}
+
+/* SearchResults — flat, keyboard-aware Spotlight panel. The dashboard owns
+   the active index + keyboard handling; this just renders the sections. */
+function SearchResults({ sections, activeIdx, onHoverItem, onSelectItem }) {
+  const hasSections = sections.some((s) => s.items.length > 0);
+  const totalCount = sections.reduce((n, s) => n + s.items.length, 0);
 
   return (
     <div className="g-search-results">
-      {!hasResults ? (
+      {!hasSections ? (
         <div className="g-search-empty">
           <Search size={20} style={{ color: C.textDimmer }} />
-          <span>No results found for "{query}"</span>
+          <span>No results found — try a station, page, plate or metric name.</span>
         </div>
       ) : (
         <>
-          {groupedResults.dashboards.length > 0 && (
-            <div className="g-search-group">
-              <div className="g-search-group-title">Dashboards</div>
-              {groupedResults.dashboards.map((result, i) => (
-                <button
-                  key={i}
-                  className="g-search-result-item"
-                  onClick={() => onSelectResult(result)}
-                >
-                  <LayoutDashboard size={14} style={{ color: C.cyan }} />
-                  <div className="g-search-result-content">
-                    <div className="g-search-result-title">{result.title}</div>
-                    <div className="g-search-result-sub">{result.description}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
+          {sections.map((sec) =>
+            sec.items.length === 0 ? null : (
+              <div className="g-search-group" key={sec.label}>
+                <div className="g-search-group-title">{sec.label}</div>
+                {sec.items.map((item, ii) => {
+                  let idx = -1;
+                  let running = 0;
+                  for (const s of sections) {
+                    if (s === sec) { idx = running + ii; break; }
+                    running += s.items.length;
+                  }
+                  const isActive = idx === activeIdx;
+                  const icon =
+                    item.icon ||
+                    (item.type === "dashboard" ? <LayoutDashboard size={14} /> :
+                     item.type === "charger" ? <MapPin size={14} /> :
+                     item.type === "action" ? <Sparkles size={14} /> :
+                     <BarChart3 size={14} />);
+                  return (
+                    <button
+                      key={ii}
+                      type="button"
+                      className={`g-search-result-item ${isActive ? "g-search-result-active" : ""}`}
+                      onMouseEnter={() => onHoverItem(idx)}
+                      onClick={() => onSelectItem(item)}
+                    >
+                      <span className="g-search-result-icon" style={{ color: isActive ? C.cyan : C.cyan }}>{icon}</span>
+                      <div className="g-search-result-content">
+                        <div className="g-search-result-title">{highlightQuery(item.title, item.queryHighlight)}</div>
+                        {item.sub && <div className="g-search-result-sub">{highlightQuery(item.sub, item.queryHighlight)}</div>}
+                      </div>
+                      {item.badge ? (
+                        <span className="g-search-result-badge" style={{ color: item.badgeColor || C.textDim }}>{item.badge}</span>
+                      ) : (
+                        <span className="g-search-result-hint">↵</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )
           )}
-          {groupedResults.chargers.length > 0 && (
-            <div className="g-search-group">
-              <div className="g-search-group-title">Chargers</div>
-              {groupedResults.chargers.map((result, i) => (
-                <button
-                  key={i}
-                  className="g-search-result-item"
-                  onClick={() => onSelectResult(result)}
-                >
-                  <MapPin size={14} style={{ color: result.status === 'available' ? C.green : result.status === 'busy' ? C.amber : C.red }} />
-                  <div className="g-search-result-content">
-                    <div className="g-search-result-title">{result.title}</div>
-                    <div className="g-search-result-sub">{result.description}</div>
-                  </div>
-                  <Badge status={result.status}>{result.status}</Badge>
-                </button>
-              ))}
-            </div>
-          )}
-          {groupedResults.data.length > 0 && (
-            <div className="g-search-group">
-              <div className="g-search-group-title">Data & Metrics</div>
-              {groupedResults.data.map((result, i) => (
-                <button
-                  key={i}
-                  className="g-search-result-item"
-                  onClick={() => onSelectResult(result)}
-                >
-                  <BarChart3 size={14} style={{ color: C.cyan }} />
-                  <div className="g-search-result-content">
-                    <div className="g-search-result-title">{result.title}</div>
-                    <div className="g-search-result-sub">{result.description}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="g-search-footer">
+            {totalCount} result{totalCount !== 1 ? "s" : ""} · <b>↑↓</b> navigate <b>↵</b> open <b>esc</b> close
+          </div>
         </>
       )}
     </div>
@@ -1534,7 +1675,7 @@ function NotificationCenter({ notifications, onDismiss, onMarkRead }) {
       >
         <Bell size={14} />
         {unreadCount > 0 && (
-          <span className="g-notification-badge">{unreadCount}</span>
+          <span key={unreadCount} className="g-notification-badge">{unreadCount}</span>
         )}
       </button>
       
@@ -1602,7 +1743,7 @@ function TopBar({ name, role, onLogout, notifications, onDismissNotification, on
         <span>GRIDPULSE</span>
       </div>
       <div className="g-topbar-right">
-        <button className="g-btn-ghost" onClick={onToggleMinimal} title={minimalMode ? "Switch to premium mode" : "Switch to minimal mode"}>
+        <button className="g-btn-ghost" onClick={onToggleMinimal} title={minimalMode ? "Switch to NothingOS dark" : "Switch to NothingOS light"}>
           {minimalMode ? <Sun size={14} /> : <Moon size={14} />}
         </button>
         <button className="g-btn-ghost" onClick={onShowHelp} title="Keyboard shortcuts (Ctrl+/)">
@@ -2162,10 +2303,10 @@ function DriverOverviewPage({ name, preferences, vehicleProfile }) {
           <div className="g-kpi-sub" style={{ marginBottom: 10 }}>Estimated capacity retention</div>
           <ResponsiveContainer width="100%" height={90}>
             <LineChart data={driverBatteryHealth}>
-              <Line type="monotone" dataKey="health" stroke={C.green} strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="health" stroke={C.green} strokeWidth={2} dot={false} activeDot={CHART_ACTIVE_GREEN} />
               <XAxis dataKey="month" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis hide domain={[90, 100]} />
-              <Tooltip content={<ChartTooltip unit="%" />} />
+              <Tooltip content={<ChartTooltip unit="%" />} cursor={CHART_LINE_CURSOR} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -2178,7 +2319,7 @@ function DriverOverviewPage({ name, preferences, vehicleProfile }) {
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="day" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<ChartTooltip unit=" km" />} cursor={{ fill: "rgba(79,227,255,0.06)" }} />
+              <Tooltip content={<ChartTooltip unit=" km" />} cursor={{ fill: `${C.cyan}11` }} />
               <Bar dataKey="rangeKm" fill={C.cyan} radius={[4, 4, 0, 0]} name="Distance" />
             </BarChart>
           </ResponsiveContainer>
@@ -2195,8 +2336,8 @@ function DriverOverviewPage({ name, preferences, vehicleProfile }) {
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="day" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<ChartTooltip unit=" $" />} />
-              <Area type="monotone" dataKey="savings" stroke={C.green} fill="url(#gDriverSave)" strokeWidth={2} name="Saved" />
+              <Tooltip content={<ChartTooltip unit=" $" />} cursor={CHART_LINE_CURSOR} />
+              <Area type="monotone" dataKey="savings" stroke={C.green} fill="url(#gDriverSave)" strokeWidth={2} name="Saved" activeDot={CHART_ACTIVE_GREEN} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -2291,7 +2432,7 @@ function DriverHistoryPage({ preferences }) {
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="day" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<ChartTooltip unit=" kWh" />} cursor={{ fill: "rgba(79,227,255,0.06)" }} />
+              <Tooltip content={<ChartTooltip unit=" kWh" />} cursor={{ fill: `${C.cyan}11` }} />
               <Bar dataKey="kwh" fill={C.cyan} radius={[4, 4, 0, 0]} name="Energy" />
             </BarChart>
           </ResponsiveContainer>
@@ -2419,10 +2560,10 @@ function DriverBatteryPage({ vehicleProfile }) {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={driverBatteryHealth}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
-              <Line type="monotone" dataKey="health" stroke={C.green} strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="health" stroke={C.green} strokeWidth={2} dot={{ r: 3 }} activeDot={CHART_ACTIVE_GREEN} />
               <XAxis dataKey="month" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} domain={[90, 100]} />
-              <Tooltip content={<ChartTooltip unit="%" />} />
+              <Tooltip content={<ChartTooltip unit="%" />} cursor={CHART_LINE_CURSOR} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -2448,14 +2589,51 @@ function escapeHtml(value) {
 /* Real Leaflet + OpenStreetMap charge-point map (dark CARTO basemap).
    Renders a pin per charger (colored by live status), an optional GPS
    user marker with an accuracy ring, and popups with live conditions. */
-function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalChargers = [], focusBounds }) {
+/* Web-mercator tile-space coords so we can cluster pins by on-screen
+   proximity instead of raw degrees (which distort with latitude). */
+function mercatorTile(lat, lng, zoom) {
+  const n = 256 * Math.pow(2, zoom);
+  const x = ((lng + 180) / 360) * n;
+  const latRad = (lat * Math.PI) / 180;
+  const y = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+  return [x, y];
+}
+
+// Keyless basemaps (no API key, no watermarked tiles):
+// dark/light use Esri canvas base + a labels overlay (clean, Apple/Google-map look).
+const TILE_URLS = {
+  dark: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    labels: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+    options: { maxZoom: 16 },
+    attribution: '&copy; <a href="https://www.esri.com">Esri</a> — Data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  },
+  light: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    labels: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+    options: { maxZoom: 16 },
+    attribution: '&copy; <a href="https://www.esri.com">Esri</a> — Data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  },
+  osm: {
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    options: { maxZoom: 19, detectRetina: false },
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  },
+};
+
+function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalChargers = [], focusBounds, searchFocus, radiusKm, route, focusSignal = 0, basemap = "dark", onBasemapChange }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
+  const tileRef = useRef(null);
+  const labelRef = useRef(null);
   const markersRef = useRef({});
   const layerRef = useRef(null);
+  const nationalLayerRef = useRef(null);
   const userLayerRef = useRef(null);
-  const fittedRef = useRef(false);
+  const routeLayerRef = useRef(null);
+  const radiusLayerRef = useRef(null);
   const [mapError, setMapError] = useState("");
+  const [zoomVersion, setZoomVersion] = useState(0);
 
   // Init the map once (guarded so a Leaflet failure can never blank the app).
   useEffect(() => {
@@ -2463,35 +2641,45 @@ function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalCharger
     if (!el || mapRef.current) return;
     let map;
     try {
-      map = L.map(el, { zoomControl: true, attributionControl: false });
-      const carto = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: "abcd",
-        maxZoom: 19,
-        detectRetina: true,
+      map = L.map(el, { zoomControl: true, attributionControl: true });
+      const base = L.tileLayer(TILE_URLS.dark.url, {
+        ...TILE_URLS.dark.options,
+        attribution: TILE_URLS.dark.attribution,
       });
-      let base = carto;
+      tileRef.current = base;
       base.addTo(map);
-      // If CARTO tiles fail to load (e.g. 401 / "API key required" / throttled),
-      // fall back to the keyless standard OpenStreetMap tile service.
+      if (TILE_URLS.dark.labels) {
+        const labels = L.tileLayer(TILE_URLS.dark.labels, {
+          ...TILE_URLS.dark.options,
+          attribution: TILE_URLS.dark.attribution,
+        });
+        labelRef.current = labels;
+        labels.addTo(map);
+      }
+      // If the base tiles fail to load, drop the label overlay and fall back to keyless OSM.
       base.on("tileerror", (ev) => {
-        if (base !== carto) return;
+        if (tileRef.current !== base) return;
         try {
-          const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-            maxZoom: 19,
-            detectRetina: false,
+          const osm = L.tileLayer(TILE_URLS.osm.url, {
+            ...TILE_URLS.osm.options,
+            attribution: TILE_URLS.osm.attribution,
           });
-          carto.remove();
+          base.remove();
+          if (labelRef.current) { labelRef.current.remove(); labelRef.current = null; }
           osm.addTo(map);
-          base = osm;
+          tileRef.current = osm;
         } catch {
           /* keep whatever tiles are available */
         }
       });
       L.control.scale({ imperial: false, position: "bottomleft" }).addTo(map);
       layerRef.current = L.layerGroup().addTo(map);
+      nationalLayerRef.current = L.layerGroup().addTo(map);
+      routeLayerRef.current = L.layerGroup().addTo(map);
+      radiusLayerRef.current = L.layerGroup().addTo(map);
       mapRef.current = map;
+      map.on("zoomend", () => setZoomVersion((v) => v + 1));
+      map.on("moveend", () => map.invalidateSize());
     } catch (err) {
       setMapError("Map tiles failed to initialise — the list view works.");
       if (map) map.remove();
@@ -2512,65 +2700,167 @@ function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalCharger
       if (ro) ro.disconnect();
       map.remove();
       mapRef.current = null;
+      tileRef.current = null;
+      labelRef.current = null;
       layerRef.current = null;
+      nationalLayerRef.current = null;
+      routeLayerRef.current = null;
+      radiusLayerRef.current = null;
       markersRef.current = {};
       userLayerRef.current = null;
     };
   }, []);
 
-  // One-time framing: GPS fix wins, then requested focus bounds, otherwise near chargers.
+  // Basemap switch (Dark / Light / OSM).
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || fittedRef.current) return;
-    fittedRef.current = true;
-    if (userFix) map.setView([userFix.lat, userFix.lng], 13);
-    else if (focusBounds && focusBounds.length) map.fitBounds(L.latLngBounds(focusBounds.filter((c) => c.lat != null && c.lng != null).map((c) => [c.lat, c.lng])).pad(0.2), { maxZoom: 9 });
-    else if (chargers.length) map.fitBounds(L.latLngBounds(chargers.filter((c) => c.lat != null && c.lng != null).map((c) => [c.lat, c.lng])).pad(0.22), { maxZoom: 14 });
-  }, [userFix, chargers]);
+    if (!map || !tileRef.current) return;
+    const conf = TILE_URLS[basemap] || TILE_URLS.dark;
+    const next = L.tileLayer(conf.url, { ...conf.options, attribution: conf.attribution });
+    tileRef.current.remove();
+    if (labelRef.current) { labelRef.current.remove(); labelRef.current = null; }
+    if (conf.labels) {
+      const labels = L.tileLayer(conf.labels, { ...conf.options, attribution: conf.attribution });
+      labelRef.current = labels;
+      labels.addTo(map);
+    }
+    next.addTo(map);
+    tileRef.current = next;
+    map.invalidateSize();
+  }, [basemap]);
 
-  // Charger pins (rebuilt when conditions/distances update).
+  // Refit the frame when focus changes: GPS fix wins, then an explicit
+  // search focus (geocoded) or bounds, otherwise the nearby chargers.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (searchFocus && searchFocus.center) {
+      const c = [searchFocus.center.lat, searchFocus.center.lng];
+      const z = searchFocus.zoom || 12;
+      try {
+        map.flyTo(c, z, { duration: 0.6 });
+      } catch {
+        map.setView(c, z);
+      }
+    } else if (focusBounds && focusBounds.length) {
+      map.fitBounds(
+        L.latLngBounds(focusBounds.filter((c) => c.lat != null && c.lng != null).map((c) => [c.lat, c.lng])).pad(0.2),
+        { maxZoom: 10, animate: true, duration: 0.6 }
+      );
+    } else if (userFix) {
+      map.setView([userFix.lat, userFix.lng], 13);
+    } else if (chargers.length) {
+      map.fitBounds(
+        L.latLngBounds(chargers.filter((c) => c.lat != null && c.lng != null).map((c) => [c.lat, c.lng])).pad(0.22),
+        { maxZoom: 14, animate: true }
+      );
+    }
+  }, [focusSignal, userFix?.lat, userFix?.lng, searchFocus, focusBounds]);
+
+  // Primary charger pins (rebuilt when conditions/distances update).
   useEffect(() => {
     const map = mapRef.current;
     const layer = layerRef.current;
     if (!map || !layer) return;
     layer.clearLayers();
     markersRef.current = {};
-
-    // Static nationwide stations first (dim + smaller, country overview).
-    (nationalChargers || []).forEach((c) => {
-      if (!c.lat || !c.lng) return;
-      const dot = document.createElement("div");
-      dot.className = "g-lf-pin g-lf-pin-national";
-      dot.style.setProperty("--pin", C.cyan);
-      const icon = L.divIcon({ className: "g-lf-icon", html: dot.outerHTML, iconSize: [12, 12], iconAnchor: [6, 6] });
-      const m = L.marker([c.lat, c.lng], { icon });
-      m.bindPopup(
-        `<div class="g-lf-pop"><b>${escapeHtml(c.name)}</b><br/><span style="color:${C.cyan}">● ${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span><br/>Power · ${escapeHtml(c.power)}<br/>Plugs · ${escapeHtml(c.plugs)}<br/>Operator · ${escapeHtml(c.operator)}</div>`
-      );
-      m.on("click", () => onSelect && onSelect(c));
-      m.addTo(layer);
-      markersRef.current[c.name] = m;
-    });
-
-    chargers.forEach((c) => {
+    chargers.forEach((c, i) => {
       if (!c.lat || !c.lng) return;
       const color = STATUS_COLOR[c.status] || C.cyan;
       const dot = document.createElement("div");
       dot.className = c.matchesFilter ? "g-lf-pin" : "g-lf-pin g-lf-pin-off";
+      if (c.name === selectedName) dot.classList.add("g-lf-pin-selected");
       dot.style.setProperty("--pin", color);
-      const icon = L.divIcon({ className: "g-lf-icon", html: dot.outerHTML, iconSize: [16, 16], iconAnchor: [8, 8] });
-      const m = L.marker([c.lat, c.lng], { icon });
+      dot.style.setProperty("--i", `${(i % 14) * 0.03}s`);
+      const icon = L.divIcon({ className: "g-lf-icon", html: dot.outerHTML, iconSize: [18, 18], iconAnchor: [9, 9] });
+      const m = L.marker([c.lat, c.lng], { icon, zIndexOffset: c.name === selectedName ? 500 : 0 });
       m.bindPopup(popupHtml(c));
-      m.on("click", () => onSelect(c));
+      m.on("click", () => {
+        const pad = document.querySelector(".g-map-details");
+        if (pad && map) {
+          const pt = map.latLngToContainerPoint(m.getLatLng());
+          pad.style.setProperty("--ox", `${pt.x}px`);
+          pad.style.setProperty("--oy", `${pt.y}px`);
+        }
+        onSelect(c);
+      });
+      m.on("mouseover", () => dot.classList.add("g-lf-pin-hover"));
+      m.on("mouseout", () => dot.classList.remove("g-lf-pin-hover"));
       m.addTo(layer);
-      markersRef.current[c.name] = m;
+      markersRef.current[c.name] = { marker: m, single: true };
     });
     if (selectedName && markersRef.current[selectedName]) {
-      const m = markersRef.current[selectedName];
-      m.openPopup();
-      map.panTo(m.getLatLng(), { animate: true });
+      const { marker } = markersRef.current[selectedName];
+      marker.openPopup();
+      const p = marker.getLatLng();
+      try {
+        map.panTo(p, { animate: true });
+      } catch {
+        map.setView(p, (searchFocus && searchFocus.zoom) || 13);
+      }
     }
-  }, [chargers, selectedName, onSelect, nationalChargers]);
+  }, [chargers, selectedName, onSelect]);
+
+  // Nationwide stations as a clustered layer (rebuild on zoom so pins merge
+  // and split smoothly as you zoom in/out).
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = nationalLayerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    const list = (nationalChargers || []).filter((c) => c.lat != null && c.lng != null);
+    if (!list.length) return;
+
+    // Group into ~44px on-screen cells at the current zoom.
+    const cell = 44;
+    const zoom = map.getZoom();
+    const groups = new Map();
+    list.forEach((c) => {
+      const [x, y] = mercatorTile(c.lat, c.lng, zoom);
+      const key = `${Math.floor(x / cell)}:${Math.floor(y / cell)}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(c);
+    });
+
+    groups.forEach((cellList, key) => {
+      if (cellList.length === 1) {
+        const c = cellList[0];
+        const dot = document.createElement("div");
+        dot.className = "g-lf-pin g-lf-pin-national";
+        dot.style.setProperty("--pin", C.textDimmer);
+        dot.style.setProperty("--i", `${(hashInt(key) % 10) * 0.02}s`);
+        const icon = L.divIcon({ className: "g-lf-icon", html: dot.outerHTML, iconSize: [13, 13], iconAnchor: [6.5, 6.5] });
+        const m = L.marker([c.lat, c.lng], { icon });
+        m.bindPopup(
+          `<div class="g-lf-pop"><b>${escapeHtml(c.name)}</b><br/><span style="color:${C.cyan}">● ${escapeHtml(c.city)}, ${escapeHtml(c.state)}</span><br/>Power · ${escapeHtml(c.power || "")}<br/>Plugs · ${escapeHtml(c.plugs || "")}<br/>Operator · ${escapeHtml(c.operator || "")}</div>`
+        );
+        m.on("click", () => onSelect && onSelect(c));
+        m.addTo(layer);
+        return;
+      }
+      // Cluster bubble: click zooms in until the pins split.
+      const pts = cellList.map((c) => [c.lat, c.lng]);
+      const center = pts.reduce((a, p) => [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length], [0, 0]);
+      const n = cellList.length;
+      const div = document.createElement("div");
+      div.className = "g-lf-cluster";
+      div.style.setProperty("--n", String(n));
+      div.textContent = n > 99 ? "99+" : n;
+      const icon = L.divIcon({ className: "g-lf-icon", html: div.outerHTML, iconSize: [34, 34], iconAnchor: [17, 17] });
+      const m = L.marker(center, { icon });
+      m.bindTooltip(
+        cellList.slice(0, 5).map((c) => escapeHtml(c.name)).join("<br/>") +
+          (n > 5 ? `<br/><i style="color:${C.textDimmer}">and ${n - 5} more…</i>` : ""),
+        { direction: "top", offset: [0, -14] }
+      );
+      m.on("click", () => {
+        const nextZoom = Math.min(map.getZoom() + 3, 15);
+        map.flyTo(center, nextZoom, { duration: 0.55 });
+        setTimeout(() => setZoomVersion((v) => v + 1), 600);
+      });
+      m.addTo(layer);
+    });
+  }, [nationalChargers, zoomVersion, onSelect]);
 
   // GPS user marker + accuracy ring.
   useEffect(() => {
@@ -2595,8 +2885,52 @@ function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalCharger
       zIndexOffset: 1000,
     }).addTo(lg);
     userLayerRef.current = lg;
-    if (fittedRef.current) map.setView([userFix.lat, userFix.lng], Math.max(map.getZoom(), 13));
   }, [userFix]);
+
+  // Proximity search radius circle.
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = radiusLayerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    if (radiusKm && userFix && userFix.lat) {
+      L.circle([userFix.lat, userFix.lng], {
+        radius: Number(radiusKm) * 1000,
+        color: C.cyan, weight: 1.5, opacity: 0.6, dashArray: "6 6",
+        fillColor: C.cyan, fillOpacity: 0.05,
+        interactive: false,
+      }).addTo(layer);
+    }
+  }, [radiusKm, userFix?.lat, userFix?.lng]);
+
+  // Animated route polyline from origin to the selected charger.
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = routeLayerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    if (!route || !Array.isArray(route.positions) || route.positions.length < 2) return;
+    const latlngs = route.positions.map((p) => [p[0], p[1]]);
+    L.polyline(latlngs, {
+      color: C.cyan, weight: 8, opacity: 0.14, interactive: false,
+    }).addTo(layer);
+    L.polyline(latlngs, {
+      color: C.cyan, weight: 3, opacity: 0.95, className: "g-route-line",
+      dashArray: "1 12", lineCap: "round", interactive: false,
+    }).addTo(layer);
+    L.circleMarker(latlngs[0], {
+      radius: 6, color: "#fff", weight: 2, fillColor: C.cyan, fillOpacity: 1,
+    }).addTo(layer);
+    L.circleMarker(latlngs[latlngs.length - 1], {
+      radius: 6, color: "#fff", weight: 2, fillColor: C.green, fillOpacity: 1,
+    }).addTo(layer);
+  }, [route]);
+
+  function hashInt(s) {
+    let h = 0;
+    for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
 
   function popupHtml(c) {
     const color = STATUS_COLOR[c.status] || C.cyan;
@@ -2604,16 +2938,40 @@ function ChargerMap({ chargers, userFix, selectedName, onSelect, nationalCharger
       `<b>${escapeHtml(c.name)}</b>`,
       `<span style="color:${color}">● ${escapeHtml(c.statusLabel || c.status)}</span>`,
       c.connector ? `Connector · ${escapeHtml(c.connector)}` : null,
+      c.rating ? `Rating · ${"★".repeat(Math.round(c.rating))}</span> · ${c.rating.toFixed(1)}` : null,
       c.priceLabel ? `Rate · ${escapeHtml(c.priceLabel)}${c.priceNow ? ` <span style="color:${C.amber}">(now ${escapeHtml(c.priceNow)})</span>` : ""}` : null,
       c.distLabel ? `Distance · ${escapeHtml(c.distLabel)}${c.mins != null ? ` · ≈ ${c.mins} min drive` : ""}` : null,
+      c.hours ? `Hours · ${escapeHtml(c.hours)}` : null,
       c.chargingNow ? `<span style="color:${C.cyan}">⚡ ${c.loadKw != null ? `${c.loadKw.toFixed(1)} kW` : "Charging"}${c.soc != null ? ` · SoC ${Math.round(c.soc)}%` : ""}</span>` : null,
     ].filter(Boolean).join("<br/>");
     return `<div class="g-lf-pop">${lines}</div>`;
   }
+
   if (mapError) {
     return <div className="g-map-leaflet"><div className="g-map-fallback"><MapPin size={18} style={{ color: C.amber }} /><span>{mapError}</span></div></div>;
   }
-  return <div className="g-map-leaflet" ref={elRef} />;
+  return (
+    <div className="g-map-wrap">
+      <div className="g-map-leaflet" ref={elRef} />
+      <div className="g-basemap-switch" role="group" aria-label="Map style">
+        {[
+          ["dark", Moon, "Dark"],
+          ["light", Sun, "Light"],
+          ["osm", Compass, "OSM"],
+        ].map(([key, Icon, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={`g-basemap-btn ${basemap === key ? "active" : ""}`}
+            title={label}
+            onClick={() => onBasemapChange && onBasemapChange(key)}
+          >
+            <Icon size={14} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function DriverChargersPage({ preferences }) {
@@ -2626,14 +2984,15 @@ function DriverChargersPage({ preferences }) {
   const [proximity, setProximity] = useState("any");
   const [nationalChargers] = useState(() =>
     IN_CHARGERS.map((c) => {
-      const usdRate = 0.18;
-      const perKwh = preferences.currency === "INR" ? Math.round(usdRate * (fxRate || 83)) : usdRate;
+      const inr = Number(c.price) || 15;
+      const perKwh = preferences.currency === "INR" ? inr : Math.round((inr * 100) / (fxRate || 83)) / 100;
       return {
         ...c,
         status: "available",
         statusLabel: "Nationwide",
         connector: c.plugs,
-        price: String(perKwh),
+        price: perKwh,
+        priceNum: perKwh,
         priceLabel: `${formatCurrency(perKwh, preferences.currency, preferences.region)}/kWh`,
         distance: "Nationwide station",
       };
@@ -2646,8 +3005,19 @@ function DriverChargersPage({ preferences }) {
   const [tripPlan, setTripPlan] = useState(null);
   const [tripFocus, setTripFocus] = useState(null);
   const [tripError, setTripError] = useState("");
+  const [tripStateLabel, setTripStateLabel] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocus, setSearchFocus] = useState(null);
+  const [filterOperator, setFilterOperator] = useState("all");
+  const [filterConnector, setFilterConnector] = useState("all");
+  const [filterPower, setFilterPower] = useState("all");
+  const [sortBy, setSortBy] = useState("distance");
+  const [customRadius, setCustomRadius] = useState(5);
+  const [basemap, setBasemap] = useState("dark");
+  const [focusSignal, setFocusSignal] = useState(0);
+  const [geoHit, setGeoHit] = useState(null);
+  const [geoState, setGeoState] = useState("idle"); // idle | loading | ready | empty | error
+  const [tripBusy, setTripBusy] = useState(false);
 
   // Attach a GPS-derived (straight-line) distance when we have a live fix.
   const withDist = useMemo(
@@ -2704,7 +3074,7 @@ function DriverChargersPage({ preferences }) {
     };
   });
 
-  // Road distances + drive times from the OSRM public routing service.
+  // Road distances + drive times from the backend OSRM proxy.
   // Falls back to straight-line automatically when offline/slow.
   const [routes, setRoutes] = useState({});
   const [routeState, setRouteState] = useState("idle"); // idle | loading | ready | offline
@@ -2716,15 +3086,12 @@ function DriverChargersPage({ preferences }) {
     }
     let cancelled = false;
     setRouteState("loading");
-    const origin = `${geo.loc.lng},${geo.loc.lat}`;
     Promise.allSettled(
       nearbyChargers.map(async (c) => {
-        const url = `https://router.project-osrm.org/route/v1/driving/${origin};${c.lng},${c.lat}?overview=false&alternatives=false&steps=false`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
-        const j = await res.json();
-        const r = j && j.routes && j.routes[0];
-        if (!r) throw new Error("no route");
-        return { name: c.name, km: r.distance / 1000, minutes: Math.round(r.duration / 60) };
+        const j = await api.getRoute(geo.loc.lat, geo.loc.lng, c.lat, c.lng);
+        if (!j || !Array.isArray(j.positions) || !j.positions.length) throw new Error("no route");
+        const km = j.distanceKm ?? j.estimatedKm ?? null;
+        return { name: c.name, km, minutes: j.durationMin };
       })
     )
       .then((results) => {
@@ -2751,37 +3118,97 @@ function DriverChargersPage({ preferences }) {
     return [...effective].sort((a, b) => (effKm(a) ?? Infinity) - (effKm(b) ?? Infinity));
   }, [effective, geo.loc, routes]);
 
-  // Location search: browse chargers anywhere in India by city or state.
+  // Geocode fallback: when the query isn't a known city/state, ask Nominatim (proxied on the backend).
+  const localHit = useMemo(() => matchCity((searchQuery || "").trim()), [searchQuery]);
+
+  useEffect(() => {
+    const q = (searchQuery || "").trim();
+    if (!q || q.length < 3 || localHit) {
+      setGeoState("idle");
+      setGeoHit(null);
+      return;
+    }
+    let cancelled = false;
+    setGeoState("loading");
+    const t = setTimeout(async () => {
+      try {
+        const data = await api.geocode(q);
+        if (cancelled) return;
+        const hit = data && data.results && data.results[0];
+        if (hit) {
+          setGeoHit({ name: hit.name, display_name: hit.display_name, lat: hit.lat, lon: hit.lon });
+          setGeoState("ready");
+        } else {
+          setGeoHit(null);
+          setGeoState("empty");
+        }
+      } catch {
+        if (!cancelled) { setGeoHit(null); setGeoState("error"); }
+      }
+    }, 380);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [searchQuery, localHit]);
+
+  // Location search: browse chargers anywhere in India by city/state, or a geocoded pin.
   const locSearch = useMemo(() => {
     const q = (searchQuery || "").trim().toLowerCase();
-    if (!q) return { results: [], active: false, label: "" };
+    if (!q) return { results: [], active: false, label: "", source: null };
     const cityMatches = (c) =>
       c.city?.toLowerCase().includes(q) || c.state?.toLowerCase().includes(q);
-    const results = nationalChargers.filter(cityMatches);
+    let results = nationalChargers.filter(cityMatches);
+    let source = "city";
+    if (!results.length && geoHit) {
+      const center = { lat: geoHit.lat, lng: geoHit.lon };
+      results = nationalChargers
+        .map((c) => ({ ...c, _km: haversineKm(center, c) }))
+        .filter((c) => c._km <= 40)
+        .sort((a, b) => a._km - b._km)
+        .slice(0, 30);
+      source = "geo";
+    } else if (results.length > 120) {
+      results = results.slice(0, 120);
+    }
     let label = "";
     if (results.length) {
-      const city = results[0].city;
-      const st = results[0].state;
-      label = `${results.length} station${results.length === 1 ? "" : "s"} in ${city}, ${st}`;
+      if (source === "geo" && geoHit) {
+        label = `${results.length} station${results.length === 1 ? "" : "s"} near "${geoHit.display_name || geoHit.name}"`;
+      } else {
+        const city = results[0].city;
+        const st = results[0].state;
+        label = `${results.length} station${results.length === 1 ? "" : "s"} in ${city}, ${st}`;
+      }
     }
-    return { results, active: results.length > 0, label };
-  }, [searchQuery, nationalChargers]);
+    return { results, active: results.length > 0, label, source };
+  }, [searchQuery, nationalChargers, geoHit]);
 
-  // Focus the map on the searched city's centroid.
+  // Focus the map on the searched city's centroid (or geocoded pin) as it changes.
   useEffect(() => {
     if (!locSearch.active || !locSearch.results.length) {
       setSearchFocus(null);
       return;
     }
     const first = locSearch.results[0];
-    const cityMeta = IN_CITIES[first.city] || IN_CITIES[first.state];
-    setSearchFocus({
-      center: cityMeta ? { lat: cityMeta.lat, lng: cityMeta.lng } : { lat: first.lat, lng: first.lng },
-      zoom: 11,
-    });
-  }, [locSearch.active, locSearch.results]);
+    const center = geoHit
+      ? { lat: geoHit.lat, lng: geoHit.lon }
+      : CITY_CENTROID(first.city) || CITY_CENTROID(first.state) || { lat: first.lat, lng: first.lng };
+    const zoom = geoHit ? 13 : first.city ? 11 : 10;
+    setSearchFocus(center ? { center, zoom } : null);
+  }, [locSearch.active, locSearch.results, geoHit]);
 
-  const locationResults = locSearch.active ? locSearch.results : [];
+  // Re-fit the map whenever a fresh search/trip focus lands.
+  useEffect(() => {
+    if (searchFocus) setFocusSignal((f) => f + 1);
+  }, [searchFocus?.center?.lat, searchFocus?.center?.lng]);
+
+  const locationResults = useMemo(() => {
+    if (!locSearch.active) return [];
+    return locSearch.results.map((c) => {
+      const center = geoHit
+        ? { lat: geoHit.lat, lng: geoHit.lon }
+        : CITY_CENTROID(c.city) || CITY_CENTROID(c.state) || { lat: c.lat, lng: c.lng };
+      return { ...c, km: haversineKm(center, c) };
+    });
+  }, [locSearch.active, locSearch.results, geoHit]);
 
   // Build a combined dataset for list/map: local chargers plus any location-search hits.
   const displayChargers = useMemo(() => {
@@ -2792,36 +3219,58 @@ function DriverChargersPage({ preferences }) {
     return merged;
   }, [effective, locSearch.active, locationResults]);
 
-  const filteredChargers = (locSearch.active ? displayChargers : ordered)
-    .filter((charger) => filterStatus === "all" || charger.status === filterStatus)
-    .filter((charger) => proximity === "any" || (effKm(charger) != null && effKm(charger) <= Number(proximity)));
+  const inferPowerClass = (c) => {
+    if (c.powerClass) return c.powerClass;
+    const kw = Number(c.powerKw) || parseFloat(String(c.power || "").replace(/[^0-9.]/g, "")) || 0;
+    if (kw >= 100) return "ultra";
+    if (kw >= 40) return "fast";
+    return "ac";
+  };
+
+  const matchesAllFilters = (c) => {
+    if (filterStatus !== "all" && c.status !== filterStatus) return false;
+    if (filterOperator !== "all" && c.operator !== filterOperator) return false;
+    if (filterConnector !== "all" && !(c.connectorTypes || [c.connector]).some((t) => String(t).toLowerCase().includes(filterConnector.toLowerCase()))) return false;
+    if (filterPower !== "all" && inferPowerClass(c) !== filterPower) return false;
+    if (proximity === "any") return true;
+    const km = effKm(c);
+    return km != null && km <= (proximity === "custom" ? customRadius : Number(proximity));
+  };
+
+  const visibleSource = locSearch.active ? displayChargers : ordered;
+
+  const filteredChargers = useMemo(() => {
+    const list = [...visibleSource];
+    if (sortBy === "rating") list.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    else if (sortBy === "price") list.sort((a, b) => (a.priceNum ?? Infinity) - (b.priceNum ?? Infinity));
+    else if (sortBy === "power") list.sort((a, b) => (b.powerKw || 0) - (a.powerKw || 0));
+    else if (locSearch.active) list.sort((a, b) => (a.km ?? Infinity) - (b.km ?? Infinity));
+    return list.filter(matchesAllFilters);
+  }, [visibleSource, sortBy, filterStatus, filterOperator, filterConnector, filterPower, proximity, customRadius, locSearch.active, geo.loc, routes]);
 
   const nearest = geo.loc ? [...ordered].filter((c) => effKm(c) != null)[0] : null;
 
   const mapData = (locSearch.active ? displayChargers : effective).map((charger) => {
     const r = routes[charger.name];
-    const distLabel = r ? formatKm(r.km) : geo.loc && charger.km != null ? formatKm(charger.km) : charger.distance || "Nationwide";
-    const mins = r ? r.minutes : geo.loc && charger.km != null ? effMins(charger) : null;
-    return {
-      ...charger,
-      distLabel,
-      mins,
-      matchesFilter:
-        (filterStatus === "all" || charger.status === filterStatus) &&
-        (proximity === "any" || (effKm(charger) != null && effKm(charger) <= Number(proximity))),
-    };
+    const distLabel = r ? formatKm(r.km) : charger.km != null ? formatKm(charger.km) : charger.distance || "Nationwide";
+    const mins = r ? r.minutes : charger.km != null ? effMins(charger) : null;
+    return { ...charger, distLabel, mins, matchesFilter: matchesAllFilters(charger) };
   });
 
   useEffect(() => {
-    if (selectedCharger && !nearbyChargers.some((charger) => charger.name === selectedCharger.name)) {
-      setSelectedCharger(null);
-    }
-  }, [nearbyChargers, selectedCharger]);
+    if (!selectedCharger) return;
+    const stillKnown =
+      nearbyChargers.some((c) => c.name === selectedCharger.name) ||
+      nationalChargers.some((c) => c.name === selectedCharger.name) ||
+      locationResults.some((c) => c.name === selectedCharger.name);
+    if (!stillKnown) setSelectedCharger(null);
+  }, [nearbyChargers, nationalChargers, locationResults, selectedCharger]);
 
   // What to show for a charger's distance: road → straight-line → static.
   const distMeta = (c) => {
     const r = routes[c.name];
     if (r) return { label: formatKm(r.km), mins: r.minutes, note: "road" };
+    if (locSearch.active && c.km != null) return { label: formatKm(c.km), mins: Math.max(1, Math.round((c.km / 35) * 60)), note: null };
     if (geo.loc && c.km != null) return { label: formatKm(c.km), mins: effMins(c), note: "straight-line" };
     return { label: c.distance, mins: null, note: null };
   };
@@ -2849,22 +3298,55 @@ function DriverChargersPage({ preferences }) {
       .catch(() => {});
   };
 
-  const runTripPlan = () => {
+  // Road route from your location (or the searched area) to the selected charger.
+  const routeOrigin = useMemo(() => {
+    if (geo.loc) return { lat: geo.loc.lat, lng: geo.loc.lng };
+    if (searchFocus?.center) return { lat: searchFocus.center.lat, lng: searchFocus.center.lng };
+    if (tripFocus && tripFocus.length === 2) return { lat: tripFocus[0].lat, lng: tripFocus[0].lng };
+    return null;
+  }, [geo.loc, searchFocus, tripFocus]);
+  const routeDest = selectedCharger && selectedCharger.lat != null
+    ? { lat: selectedCharger.lat, lng: selectedCharger.lng }
+    : null;
+  const routeToStation = useRoute(routeOrigin, routeDest);
+
+  const runTripPlan = async () => {
     setTripError("");
     setTripPlan(null);
-    const from = IN_CITIES[tripFrom.trim()];
-    const to = IN_CITIES[tripTo.trim()];
     if (!tripFrom.trim() || !tripTo.trim()) {
       setTripError("Enter both an origin and destination city.");
       return;
     }
-    if (!from) { setTripError(`Unknown origin city "${tripFrom}".`); return; }
-    if (!to) { setTripError(`Unknown destination city "${tripTo}".`); return; }
     if (tripFrom.trim().toLowerCase() === tripTo.trim().toLowerCase()) {
       setTripError("Origin and destination must be different cities.");
       return;
     }
-    setTripFocus([from, to]);
+    const resolvePlace = async (text) => {
+      const hit = CITY_CENTROID(text) || matchCity(text);
+      if (hit) return { lat: hit.lat, lng: hit.lng, label: text };
+      const data = await api.geocode(text);
+      const r = data && data.results && data.results[0];
+      return r ? { lat: r.lat, lng: r.lon, label: r.display_name || r.name } : null;
+    };
+    setTripBusy(true);
+    setTripStateLabel("Resolving places…");
+    let from = null;
+    let to = null;
+    try {
+      [from, to] = await Promise.all([
+        resolvePlace(tripFrom.trim()),
+        resolvePlace(tripTo.trim()),
+      ]);
+    } finally {
+      setTripBusy(false);
+      setTripStateLabel("");
+    }
+    const fLabel = from ? from.label : `"${tripFrom.trim()}"`;
+    const tLabel = to ? to.label : `"${tripTo.trim()}"`;
+    if (!from) { setTripError(`Couldn't find origin ${fLabel} — try a nearby city (e.g. Chennai, Hosur).`); return; }
+    if (!to) { setTripError(`Couldn't find destination ${tLabel} — try a nearby city (e.g. Mumbai, Bengaluru).`); return; }
+    setTripFocus([{ lat: from.lat, lng: from.lng }, { lat: to.lat, lng: to.lng }]);
+    setFocusSignal((f) => f + 1);
     const plan = planEVRoadTrip({
       origin: from,
       destination: to,
@@ -2881,6 +3363,7 @@ function DriverChargersPage({ preferences }) {
     setTripPlan(null);
     setTripFocus(null);
     setTripError("");
+    setTripStateLabel("");
   };
 
   return (
@@ -2888,6 +3371,34 @@ function DriverChargersPage({ preferences }) {
       <div className="g-page-head">
         <h2>Find chargers</h2>
         <p>Stations near you, with live status and pricing.</p>
+      </div>
+
+      <div className="g-live-stats g-anim-rise">
+        <div className="g-live-stat">
+          <span className="g-live-stat-v"><AnimatedNumber value={filteredChargers.length} format={(v) => Math.round(v)} /></span>
+          <span className="g-live-stat-l">stations shown</span>
+        </div>
+        <div className="g-live-stat">
+          <span className="g-live-stat-v" style={{ color: C.green }}><AnimatedNumber value={filteredChargers.filter((c) => c.status === "available").length} format={(v) => Math.round(v)} /></span>
+          <span className="g-live-stat-l">available now</span>
+        </div>
+        <div className="g-live-stat">
+          <span className="g-live-stat-v g-mono"><AnimatedNumber
+            value={(() => {
+              const rates = filteredChargers.map((c) => c.priceNum).filter((p) => Number.isFinite(p) && p > 0);
+              return rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
+            })()}
+            format={(v) => (v ? formatCurrency(v, preferences.currency, preferences.region) : "—")}
+          /></span>
+          <span className="g-live-stat-l">avg price/kWh</span>
+        </div>
+        <div className="g-live-stat">
+          <span className="g-live-stat-v"><AnimatedNumber
+            value={filteredChargers.filter((c) => inferPowerClass(c) === "fast" || inferPowerClass(c) === "ultra").length}
+            format={(v) => Math.round(v)}
+          /></span>
+          <span className="g-live-stat-l">fast + ultra charges</span>
+        </div>
       </div>
 
       <Card title="Search chargers anywhere in India" icon={Search} style={{ marginBottom: 16 }}>
@@ -2898,10 +3409,17 @@ function DriverChargersPage({ preferences }) {
               list="loc-cities"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Try Powai, Mumbai, Delhi NCR, Bengaluru, Pune, Hyderabad…"
+              placeholder="Try Powai, Mumbai, Delhi NCR, Hosur, Bengaluru, Pune…"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && searchQuery) {
+                  setSearchQuery(searchQuery.trim());
+                  setViewMode("map");
+                  setFocusSignal((f) => f + 1);
+                }
+              }}
             />
             {searchQuery && (
-              <button type="button" className="g-btn-ghost g-locsearch-clear" onClick={() => { setSearchQuery(""); setSearchFocus(null); }}>
+              <button type="button" className="g-btn-ghost g-locsearch-clear" onClick={() => { setSearchQuery(""); setSearchFocus(null); setGeoHit(null); }}>
                 <X size={14} />
               </button>
             )}
@@ -2913,13 +3431,48 @@ function DriverChargersPage({ preferences }) {
         </div>
         {searchQuery && (
           <div className="g-locsearch-meta">
-            {locSearch.active ? (
-              <span className="g-locsearch-ok">
-                <MapPin size={13} style={{ color: C.cyan }} /> {locSearch.label} — showing on the list &amp; map.
+            {geoState === "loading" && !locSearch.active && (
+              <span className="g-locsearch-pending">
+                <Loader2 size={13} className="g-spin" /> Searching for "{searchQuery.trim()}"…
               </span>
-            ) : (
+            )}
+            {geoState === "error" && (
+              <span className="g-locsearch-empty">Geocoding service is offline — still trying cities and states.</span>
+            )}
+            {locSearch.active && (
+              <span className="g-locsearch-ok">
+                <MapPin size={13} style={{ color: C.cyan }} /> {locSearch.label}
+                <button
+                  type="button"
+                  className="g-btn-ghost g-chip-btn"
+                  onClick={() => { setViewMode("map"); setFocusSignal((f) => f + 1); }}
+                >
+                  Show on map
+                </button>
+              </span>
+            )}
+            {!locSearch.active && geoState === "idle" && (
               <span className="g-locsearch-empty">No chargers found for "{searchQuery.trim()}". Try another city or state (e.g. Mumbai, Delhi, Tamil Nadu, Kerala).</span>
             )}
+            {!locSearch.active && geoState === "empty" && (
+              <span className="g-locsearch-empty">No stations in the dataset within 40 km of the geocoded result — try a nearby city instead.</span>
+            )}
+          </div>
+        )}
+        {locSearch.active && locSearch.results.length > 1 && (
+          <div className="g-locsearch-chips">
+            {[...new Map(locSearch.results.map((c) => [c.city, c])).values()]
+              .slice(0, 7)
+              .map((c) => (
+                <button
+                  key={c.city}
+                  type="button"
+                  className="g-chip"
+                  onClick={() => { setSearchQuery(c.city); setViewMode("map"); }}
+                >
+                  {c.city} · {locSearch.results.filter((x) => x.city === c.city).length}
+                </button>
+              ))}
           </div>
         )}
       </Card>
@@ -3065,14 +3618,57 @@ function DriverChargersPage({ preferences }) {
           </div>
         </Card>
 
+        <Card title="Charger type" icon={Power}>
+          <div className="g-filter-options">
+            {[["all", "All"], ["ultra", "Ultra"], ["fast", "Fast"], ["ac", "AC"]].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`g-filter-btn ${filterPower === value ? "active" : ""}`}
+                onClick={() => setFilterPower(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        <Card title="Connector" icon={Plug}>
+          <div className="g-filter-options">
+            {[["all", "All"], ["CCS2", "CCS2"], ["CHAdeMO", "CHAdeMO"], ["Type2", "Type 2"]].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`g-filter-btn ${filterConnector === value ? "active" : ""}`}
+                onClick={() => setFilterConnector(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        <Card title="Operator" icon={Zap}>
+          <div className="g-filter-options">
+            <select
+              className="g-select"
+              value={filterOperator}
+              onChange={(e) => setFilterOperator(e.target.value)}
+            >
+              <option value="all">All operators</option>
+              {OPERATOR_LIST.map((op) => <option key={op} value={op}>{op}</option>)}
+            </select>
+          </div>
+        </Card>
+
         <Card title="Max distance" icon={Navigation}>
           <div className="g-filter-options">
             {[
               ["any", "Any"],
-              ["1", "≤ 1 km"],
               ["2", "≤ 2 km"],
               ["5", "≤ 5 km"],
-              ["10", "≤ 10 km"],
+              ["20", "≤ 20 km"],
+              ["custom", customRadius !== "any" ? `≤ ${customRadius} km` : "Custom…"],
             ].map(([value, label]) => (
               <button
                 key={value}
@@ -3085,6 +3681,33 @@ function DriverChargersPage({ preferences }) {
                 {label}
               </button>
             ))}
+            {proximity === "custom" && (
+              <div className="g-radius-slider">
+                <input
+                  type="range"
+                  min="3"
+                  max="50"
+                  step="1"
+                  value={customRadius}
+                  onChange={(e) => setCustomRadius(Number(e.target.value))}
+                />
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card title="Sort by" icon={ArrowUpDown}>
+          <div className="g-filter-options">
+            {[["distance", "Nearest"], ["rating", "Rating"], ["price", "Cheapest"], ["power", "Fastest"]].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={`g-filter-btn ${sortBy === value ? "active" : ""}`}
+                onClick={() => setSortBy(value)}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </Card>
       </div>
@@ -3093,7 +3716,7 @@ function DriverChargersPage({ preferences }) {
         <Card title="National trip planner" icon={Navigation}>
           <div className="g-trip-planner">
             <p className="g-kpi-sub" style={{ marginBottom: 14, fontSize: 12.5, lineHeight: 1.55 }}>
-              Plan an inter-city route across India. We combine the live GRIDPULSE/Vellore stations with the national Tata Power, Adani, Statiq, Fortum, Zeon, BPCL/HPCL and GRIDPULSE network (110+ sites) to work out where you'll need to stop, how long each charge takes, and what it costs.
+              Plan an inter-city route across India. We combine the live GRIDPULSE/Vellore stations with the national Tata Power, Adani, Statiq, Fortum, Zeon, BPCL/HPCL and GRIDPULSE network (340+ sites) to work out where you'll need to stop, how long each charge takes, and what it costs. Type any place name (we geocode it) — or pick from the list.
             </p>
             <div className="g-trip-fields">
               <div className="g-field-block">
@@ -3109,6 +3732,7 @@ function DriverChargersPage({ preferences }) {
               </div>
               <datalist id="trip-cities">
                 {Object.keys(IN_CITIES).map((c) => <option key={c} value={c} />)}
+                {STATE_LIST.map((s) => <option key={s} value={s} />)}
               </datalist>
               <div className="g-field-block">
                 <label className="g-field-label">Real range ({tripRangeKm} km)</label>
@@ -3120,9 +3744,10 @@ function DriverChargersPage({ preferences }) {
               </div>
             </div>
             {tripError && <div className="g-trip-error"><AlertTriangle size={13} /> {tripError}</div>}
+            {tripBusy && <div className="g-trip-error g-trip-busy"><Loader2 size={13} className="g-spin" /> {tripStateLabel || "Planning route…"}</div>}
             <div className="g-trip-actions">
-              <button type="button" className="g-btn-primary" onClick={runTripPlan}>
-                <Navigation size={14} /> Plan my trip
+              <button type="button" className="g-btn-primary" onClick={runTripPlan} disabled={tripBusy}>
+                {tripBusy ? <Loader2 size={14} className="g-spin" /> : <Navigation size={14} />} Plan my trip
               </button>
               {tripPlan && (
                 <button type="button" className="g-btn-ghost" onClick={clearTrip}>Clear</button>
@@ -3130,13 +3755,13 @@ function DriverChargersPage({ preferences }) {
             </div>
 
             {tripPlan && (
-              <div className="g-trip-results">
+              <div className="g-trip-results g-anim-rise">
                 <div className="g-trip-summary">
-                  <div className="g-trip-stat"><span className="g-trip-stat-v">{formatKm(tripPlan.totalKm)}</span><span className="g-trip-stat-l">route</span></div>
-                  <div className="g-trip-stat"><span className="g-trip-stat-v">{tripPlan.totalStops}</span><span className="g-trip-stat-l">charging stops</span></div>
-                  <div className="g-trip-stat"><span className="g-trip-stat-v">{formatDuration(tripPlan.estTotalMins / 60)}</span><span className="g-trip-stat-l">est. total</span></div>
-                  <div className="g-trip-stat"><span className="g-trip-stat-v">{tripPlan.estChargingMins}m</span><span className="g-trip-stat-l">charging</span></div>
-                  <div className="g-trip-stat"><span className="g-trip-stat-v">{formatCurrency(tripPlan.estCost, preferences.currency, preferences.region)}</span><span className="g-trip-stat-l">est. cost</span></div>
+                  <div className="g-trip-stat"><span className="g-trip-stat-v"><AnimatedNumber value={tripPlan.totalKm} format={formatKm} /></span><span className="g-trip-stat-l">route</span></div>
+                  <div className="g-trip-stat"><span className="g-trip-stat-v"><AnimatedNumber value={tripPlan.totalStops} format={(v) => Math.round(v)} /></span><span className="g-trip-stat-l">charging stops</span></div>
+                  <div className="g-trip-stat"><span className="g-trip-stat-v"><AnimatedNumber value={tripPlan.estTotalMins} format={(v) => formatDuration(v / 60)} /></span><span className="g-trip-stat-l">est. total</span></div>
+                  <div className="g-trip-stat"><span className="g-trip-stat-v"><AnimatedNumber value={tripPlan.estChargingMins} format={(v) => `${Math.round(v)}m`} /></span><span className="g-trip-stat-l">charging</span></div>
+                  <div className="g-trip-stat"><span className="g-trip-stat-v"><AnimatedNumber value={tripPlan.estCost} format={(v) => formatCurrency(Math.round(v), preferences.currency, preferences.region)} /></span><span className="g-trip-stat-l">est. cost</span></div>
                 </div>
                 {tripPlan.stops.length ? (
                   <div className="g-trip-stops">
@@ -3185,14 +3810,15 @@ function DriverChargersPage({ preferences }) {
                   <span>{locSearch.active ? `No chargers found at "${searchQuery.trim()}".` : "No chargers match these filters."}</span>
                 </div>
               ) : (
-                filteredChargers.map((c) => {
+                filteredChargers.map((c, i) => {
                   const isNearest = geo.loc && nearest && c.name === nearest.name;
                   const meta = distMeta(c);
                   return (
                   <button
                     type="button"
-                    className="g-list-row g-list-row-button"
+                    className="g-list-row g-list-row-button g-anim-rise"
                     key={c.name}
+                    style={{ animationDelay: `${Math.min(i, 24) * 0.03}s` }}
                     onClick={() => {
                       setSelectedCharger(c);
                       setViewMode("map");
@@ -3205,11 +3831,18 @@ function DriverChargersPage({ preferences }) {
                           {c.name}{" "}
                           {isNearest && <span className="g-nearest-tag">NEAREST</span>}
                           {c.live?.online && <span className="g-live-mini">LIVE</span>}
+                          {c.rating > 0 && <span className="g-rating-tag">★ {c.rating.toFixed(1)}</span>}
                         </div>
                         <div className="g-list-sub" style={{ marginTop: 2 }}>
                           {c.connector} · {c.priceLabel}
                           {c.priceNow && <span style={{ color: C.amber }}> (now {c.priceNow})</span>}
                           {meta.mins != null && <> · ≈ {meta.mins} min drive</>}
+                        </div>
+                        <div className="g-list-sub" style={{ marginTop: 2 }}>
+                          {c.power ? <>{c.power} · </> : null}
+                          {inferPowerClass(c) === "ultra" && <span className="g-badge-tiny g-badge-ultra">ULTRA</span>}
+                          {inferPowerClass(c) === "fast" && <span className="g-badge-tiny g-badge-fast">FAST</span>}
+                          {c.hours && <span style={{ opacity: 0.9 }}> · {c.hours}</span>}
                         </div>
                         {c.live && (
                           <div className="g-list-sub" style={{ marginTop: 2 }}>
@@ -3230,6 +3863,9 @@ function DriverChargersPage({ preferences }) {
                         {meta.label}
                         {meta.note && <span className="g-route-note">{meta.note === "road" ? "ROAD" : "DIRECT"}</span>}
                       </div>
+                      {routeToStation.loading && selectedCharger?.name === c.name && (
+                        <div className="g-list-sub g-shimmer" style={{ marginTop: 6 }} />
+                      )}
                     </div>
                   </button>
                   );
@@ -3248,11 +3884,17 @@ function DriverChargersPage({ preferences }) {
                   userFix={geo.state === "granted" ? geo.loc : null}
                   selectedName={selectedCharger?.name || null}
                   onSelect={setSelectedCharger}
-                  nationalChargers={nationalChargers}
-                  focusBounds={tripFocus || searchFocus}
+                  nationalChargers={locSearch.active ? [] : nationalChargers}
+                  focusBounds={tripFocus || null}
+                  searchFocus={searchFocus}
+                  radiusKm={geo.state === "granted" && proximity !== "any" ? (proximity === "custom" ? customRadius : Number(proximity)) : null}
+                  route={routeToStation.route}
+                  focusSignal={focusSignal}
+                  basemap={basemap}
+                  onBasemapChange={setBasemap}
                 />
                 {selectedCharger && (
-                <div className="g-map-details">
+                <div className="g-map-details" key={selectedCharger.name}>
                   <div className="g-map-details-header">
                     <h3>{selectedCharger.name}</h3>
                     {selectedCharger.live?.online && <span className="g-live-mini">LIVE</span>}
@@ -3276,12 +3918,26 @@ function DriverChargersPage({ preferences }) {
                       </span>
                     </div>
                     <div className="g-map-detail-row">
-                      <span className="g-map-detail-label">Coordinates</span>
-                      <span className="g-mono">{selectedCharger.lat.toFixed(4)}, {selectedCharger.lng.toFixed(4)}</span>
+                      <span className="g-map-detail-label">Power</span>
+                      <span>
+                        {selectedCharger.powerKw ? `${selectedCharger.powerKw} kW` : selectedCharger.power || "—"}
+                        {inferPowerClass(selectedCharger) === "ultra" && <span className="g-badge-tiny g-badge-ultra" style={{ marginLeft: 6 }}>ULTRA</span>}
+                        {inferPowerClass(selectedCharger) === "fast" && <span className="g-badge-tiny g-badge-fast" style={{ marginLeft: 6 }}>FAST</span>}
+                      </span>
                     </div>
                     <div className="g-map-detail-row">
-                      <span className="g-map-detail-label">Connector</span>
-                      <span>{selectedCharger.connector}</span>
+                      <span className="g-map-detail-label">Ports</span>
+                      <span>{selectedCharger.availablePorts ?? selectedCharger.totalPorts ?? "—"} of {selectedCharger.totalPorts ?? "—"} free · {selectedCharger.connector}</span>
+                    </div>
+                    {selectedCharger.rating > 0 && (
+                      <div className="g-map-detail-row">
+                        <span className="g-map-detail-label">Rating</span>
+                        <span><span style={{ color: C.amber }}>★ {selectedCharger.rating.toFixed(1)}</span> · {selectedCharger.hours || "open daily"}</span>
+                      </div>
+                    )}
+                    <div className="g-map-detail-row">
+                      <span className="g-map-detail-label">Operator</span>
+                      <span>{selectedCharger.operator || "GRIDPULSE"} · {selectedCharger.city}, {selectedCharger.state}</span>
                     </div>
                     <div className="g-map-detail-row">
                       <span className="g-map-detail-label">Price</span>
@@ -3289,6 +3945,30 @@ function DriverChargersPage({ preferences }) {
                         {selectedCharger.priceLabel}
                         {selectedCharger.priceNow && <span style={{ color: C.amber }}> → now {selectedCharger.priceNow}</span>}
                       </span>
+                    </div>
+                    {selectedCharger.amenities && selectedCharger.amenities.length > 0 && (
+                      <div className="g-map-detail-row" style={{ alignItems: "flex-start" }}>
+                        <span className="g-map-detail-label">Amenities</span>
+                        <span className="g-amenity-chips">
+                          {selectedCharger.amenities.map((a) => <span key={a} className="g-chip g-chip-mini">{a}</span>)}
+                        </span>
+                      </div>
+                    )}
+                    {routeToStation.loading && (
+                      <div className="g-map-detail-row">
+                        <span className="g-map-detail-label">Route</span>
+                        <span className="g-shimmer" style={{ display: "inline-block", height: 12, width: 90, borderRadius: 6 }} />
+                      </div>
+                    )}
+                    {!routeToStation.loading && routeToStation.route && routeToStation.distanceKm != null && (
+                      <div className="g-map-detail-row">
+                        <span className="g-map-detail-label">Drive</span>
+                        <span>{formatKm(routeToStation.distanceKm)} · ≈ {Math.max(1, Math.round(routeToStation.durationMin))} min {routeToStation.route.straight ? "(straight-line)" : "(road)"}</span>
+                      </div>
+                    )}
+                    <div className="g-map-detail-row">
+                      <span className="g-map-detail-label">Coordinates</span>
+                      <span className="g-mono">{selectedCharger.lat.toFixed(4)}, {selectedCharger.lng.toFixed(4)}</span>
                     </div>
                     {selectedCharger.live && (
                       <>
@@ -3352,13 +4032,41 @@ function formatDuration(hoursFloat) {
   return `${h}h ${m}m`;
 }
 
-function DriverChargePlannerPage({ preferences }) {
+/* ---- Customizable bill estimator prefs (per vehicle) ---- */
+const DEFAULT_BILL_PREFS = {
+  customRate: null,   // override tariff in the user's own currency per kWh (null = auto from profile/FX)
+  offPeakDisc: 25,    // % cheaper at night (10 PM – 6 AM)
+  sessions: 30,       // number of charging sessions each month
+  fixedMonthly: 0,    // connection/fixed charges per month, in the user's currency
+};
+
+function loadBillPrefs(regKey) {
+  const clean = String(regKey || "ev").toLowerCase().replace(/[^a-z0-9]/g, "") || "ev";
+  try {
+    const raw = localStorage.getItem(`gp_bill_prefs_${clean}`);
+    if (raw) return { ...DEFAULT_BILL_PREFS, ...JSON.parse(raw) };
+  } catch { /* fall through */ }
+  return { ...DEFAULT_BILL_PREFS };
+}
+
+function DriverChargePlannerPage({ preferences, vehicleProfile }) {
   const { currentSoc, vehicleName, vehicleBatteryKwh, chargeProfiles } = useDriverData();
   const { fxRate, live, liveConnected } = useLiveData();
   const geo = useGeolocation();
   const [leaveTime, setLeaveTime] = useState("07:30");
   const [targetSoc, setTargetSoc] = useState(80);
   const [profileKey, setProfileKey] = useState("balanced");
+
+  // Per-vehicle bill assumptions the driver can fine-tune (persisted locally).
+  const regKey = vehicleProfile?.regRaw || normalizePlate(vehicleProfile?.registration) || "ev";
+  const [billPrefs, setBillPrefs] = useState(() => loadBillPrefs(regKey));
+  const [editingBill, setEditingBill] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem(`gp_bill_prefs_${String(regKey).toLowerCase().replace(/[^a-z0-9]/g, "") || "ev"}`, JSON.stringify(billPrefs));
+    } catch { /* storage unavailable */ }
+  }, [billPrefs, regKey]);
+  const patchBill = (patch) => setBillPrefs((prev) => ({ ...prev, ...patch }));
 
   // Real-time weather at the driver's GPS fix shapes range + charging speed.
   const { weather: weatherAt, loading: weatherLoading } = useWeather(
@@ -3397,13 +4105,19 @@ function DriverChargePlannerPage({ preferences }) {
     const meetsDeadline = completion <= leaveDate;
     // profile.rate is quoted in USD/kWh on the backend; convert to the user's
     // currency so the estimate reflects their region (INR uses live FX rate).
-    const ratePerKwh = preferences.currency === "INR"
-      ? Math.round((profile.rate || 0.16) * (fxRate || 83))
-      : profile.rate;
+    // A driver can override the tariff entirely (entered in their own currency).
+    const customRate = Number(billPrefs.customRate);
+    const usingCustomRate = Number.isFinite(customRate) && customRate > 0;
+    const ratePerKwh = usingCustomRate
+      ? customRate
+      : preferences.currency === "INR"
+        ? Math.round((profile.rate || 0.16) * (fxRate || 83))
+        : profile.rate;
     const cost = energyNeeded * ratePerKwh;
     const gentleFeasible = requiredSteadyPower <= (chargeProfilesSafe[2]?.maxPowerKw ?? 0);
 
-    // Off-peak guidance: TOU tariffs are cheapest 10 PM - 6 AM (~25% below standard).
+    // Off-peak guidance: TOU tariffs are cheapest 10 PM - 6 AM (default ~25%
+    // below standard — the driver can tune this in the bill estimator).
     const offPeakStart = 22;
     const offPeakEnd = 6;
     const startH = now.getHours() + now.getMinutes() / 60;
@@ -3415,7 +4129,7 @@ function DriverChargePlannerPage({ preferences }) {
       const right = startH >= offPeakStart ? (endH < offPeakEnd ? 0 : Math.max(0, Math.min(endH, 24) - offPeakStart)) : 0;
       inOffPeakH = left + right;
     }
-    const offPeakDisc = 0.25;
+    const offPeakDisc = (Number(billPrefs.offPeakDisc) || 0) / 100;
     const peakCost = energyNeeded * ratePerKwh;
     const offPeakCost = energyNeeded * ratePerKwh * (1 - offPeakDisc) * Math.min(1, timeNeededHours > 0 ? inOffPeakH / timeNeededHours : 0);
     const savings = Math.max(0, peakCost - offPeakCost);
@@ -3432,6 +4146,7 @@ function DriverChargePlannerPage({ preferences }) {
     return {
       now, leaveDate, hoursAvailable, energyNeeded, powerKw, timeNeededHours,
       completion, meetsDeadline, cost, ratePerKwh, gentleFeasible,
+      usingCustomRate, offPeakDisc,
       offPeakHours: Math.round(inOffPeakH * 10) / 10,
       offPeakSavings: savings,
       // smart-charging extras
@@ -3444,7 +4159,7 @@ function DriverChargePlannerPage({ preferences }) {
         note: null,
       },
     };
-  }, [leaveTime, targetSoc, profileKey, profile, preferences.currency, preferences.region, fxRate, liveConnected, live, tempC, tempImpact]);
+  }, [leaveTime, targetSoc, profileKey, profile, preferences.currency, preferences.region, fxRate, liveConnected, live, tempC, tempImpact, billPrefs]);
 
   const alreadyThere = plan.energyNeeded <= 0;
 
@@ -3452,20 +4167,32 @@ function DriverChargePlannerPage({ preferences }) {
     const sessionEnergy = Math.max(plan.energyNeeded, 0);
     const projectedSessionBill = Math.max(plan.cost || 0, 0);
     const peakRate = plan.ratePerKwh || 0;
-    const offPeakRate = peakRate * 0.75;
+    const offPeakRate = peakRate * (1 - plan.offPeakDisc);
     const shareOffPeak = plan.timeNeededHours > 0 && plan.offPeakHours > 0
       ? Math.min(100, Math.max(0, (plan.offPeakHours / plan.timeNeededHours) * 100))
       : 0;
-    const monthlyEquivalent = projectedSessionBill * 30;
+    const sessions = Math.max(1, Math.round(Number(billPrefs.sessions) || DEFAULT_BILL_PREFS.sessions));
+    const fixedMonthly = Number(billPrefs.fixedMonthly) || 0;
+    const monthlyVariable = projectedSessionBill * sessions;
+    const monthlyTotal = monthlyVariable + fixedMonthly;
+    const monthlyEnergy = sessionEnergy * sessions;
+    const sessionSavings = plan.offPeakSavings || 0;
     return {
       sessionEnergy,
       projectedSessionBill,
       peakRate,
       offPeakRate,
       shareOffPeak,
-      monthlyEquivalent,
+      sessions,
+      fixedMonthly,
+      monthlyVariable,
+      monthlyTotal,
+      monthlyEnergy,
+      sessionSavings,
+      // With an override tariff the source is obvious, so surface it to the driver.
+      usingCustomRate: !!plan.usingCustomRate,
     };
-  }, [plan]);
+  }, [plan, billPrefs]);
 
   const quickSchedules = [
     { label: "Morning commute (8 AM)", time: "08:00", target: 80 },
@@ -3645,13 +4372,13 @@ function DriverChargePlannerPage({ preferences }) {
               )}
 
               <div className="g-schedule-timeline" style={{ marginTop: 16 }}>
-                <div className="g-schedule-seg" style={{ flex: Math.max(0.1, plan.timeNeededHours), background: "rgba(2,222,255,0.18)", borderColor: C.cyan }}>
+                <div className="g-schedule-seg" style={{ flex: Math.max(0.1, plan.timeNeededHours), background: "rgba(2,222,255,0.08)", borderColor: "rgba(79,227,255,0.25)" }}>
                   <span style={{ color: C.cyan }}>
                     {plan.now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </span>
                   <span style={{ color: C.textDim, fontSize: 11 }}>start charging</span>
                 </div>
-                <div className="g-schedule-seg" style={{ flex: Math.max(0.1, plan.hoursAvailable - plan.timeNeededHours), background: "rgba(44,225,160,0.14)", borderColor: C.green }}>
+                <div className="g-schedule-seg" style={{ flex: Math.max(0.1, plan.hoursAvailable - plan.timeNeededHours), background: "rgba(51,231,160,0.06)", borderColor: "rgba(51,231,160,0.2)" }}>
                   <span style={{ color: profile.stressColor }}>{profile.title}</span>
                   <span style={{ color: C.textDim, fontSize: 11 }}>{formatDuration(plan.timeNeededHours)}</span>
                 </div>
@@ -3692,31 +4419,107 @@ function DriverChargePlannerPage({ preferences }) {
                 <div className="g-bill-estimator-header">
                   <div>
                     <div className="g-bill-estimator-label">Bill estimator</div>
-                    <div className="g-bill-estimator-total">{formatCurrency(billEstimator.projectedSessionBill, preferences.currency, preferences.region)}</div>
+                    <div className="g-bill-estimator-total">
+                      {formatCurrency(billEstimator.monthlyTotal, preferences.currency, preferences.region)}
+                      <span className="g-bill-estimator-per">/mo</span>
+                    </div>
                   </div>
-                  <span className="g-bill-estimator-badge">Projected session</span>
+                  <div className="g-bill-estimator-actions">
+                    <button
+                      type="button"
+                      className={`g-bill-customize ${editingBill ? "active" : ""}`}
+                      onClick={() => setEditingBill((v) => !v)}
+                      title="Tune the tariff, session count and fixed charges behind this estimate"
+                    >
+                      <Settings2 size={13} /> {editingBill ? "Done" : "Customize"}
+                    </button>
+                    <span className="g-bill-estimator-badge">Projected bill</span>
+                  </div>
                 </div>
                 <div className="g-bill-estimator-grid">
                   <div className="g-bill-estimator-stat">
-                    <span className="g-bill-label">Energy</span>
-                    <strong>{billEstimator.sessionEnergy.toFixed(1)} kWh</strong>
+                    <span className="g-bill-label">This session</span>
+                    <strong>{formatCurrency(billEstimator.projectedSessionBill, preferences.currency, preferences.region)}</strong>
                   </div>
                   <div className="g-bill-estimator-stat">
                     <span className="g-bill-label">Rate</span>
-                    <strong>{formatCurrency(billEstimator.peakRate, preferences.currency, preferences.region)}/kWh</strong>
+                    <strong>{billEstimator.usingCustomRate ? "Custom" : "Auto"} · {formatCurrency(billEstimator.peakRate, preferences.currency, preferences.region)}/kWh</strong>
                   </div>
                   <div className="g-bill-estimator-stat">
                     <span className="g-bill-label">Off-peak</span>
                     <strong>{formatCurrency(billEstimator.offPeakRate, preferences.currency, preferences.region)}/kWh</strong>
                   </div>
                   <div className="g-bill-estimator-stat">
-                    <span className="g-bill-label">Monthly</span>
-                    <strong>{formatCurrency(billEstimator.monthlyEquivalent, preferences.currency, preferences.region)}</strong>
+                    <span className="g-bill-label">Sessions</span>
+                    <strong>{billEstimator.sessions}/mo</strong>
                   </div>
                 </div>
+
+                {editingBill && (
+                  <div className="g-bill-customizer">
+                    <div className="g-bill-field">
+                      <span className="g-bill-field-label">Tariff override · {preferences.currency}/kWh</span>
+                      <input
+                        type="number" min="0" step="0.01"
+                        placeholder="Auto (profile + live FX)"
+                        value={billPrefs.customRate ?? ""}
+                        onChange={(e) => patchBill({ customRate: e.target.value === "" ? null : Number(e.target.value) })}
+                      />
+                      <span className="g-bill-field-hint">Leave blank to keep the auto tariff.</span>
+                    </div>
+                    <div className="g-bill-field">
+                      <span className="g-bill-field-label">Charging sessions per month</span>
+                      <input
+                        type="number" min="1" max="120"
+                        value={billPrefs.sessions}
+                        onChange={(e) => patchBill({ sessions: Math.max(1, Number(e.target.value) || DEFAULT_BILL_PREFS.sessions) })}
+                      />
+                    </div>
+                    <div className="g-bill-field">
+                      <span className="g-bill-field-label">Off-peak discount</span>
+                      <div className="g-bill-field-suffix">
+                        <input
+                          type="number" min="0" max="60"
+                          value={billPrefs.offPeakDisc}
+                          onChange={(e) => patchBill({ offPeakDisc: Math.min(60, Math.max(0, Number(e.target.value) || DEFAULT_BILL_PREFS.offPeakDisc)) })}
+                        />
+                        <span>%</span>
+                      </div>
+                    </div>
+                    <div className="g-bill-field">
+                      <span className="g-bill-field-label">Fixed charges per month · {preferences.currency}</span>
+                      <input
+                        type="number" min="0" step="1"
+                        value={billPrefs.fixedMonthly}
+                        onChange={(e) => patchBill({ fixedMonthly: Math.max(0, Number(e.target.value) || 0) })}
+                      />
+                    </div>
+                    <button type="button" className="g-bill-reset" onClick={() => setBillPrefs({ ...DEFAULT_BILL_PREFS })}>
+                      <RotateCcw size={12} /> Reset defaults
+                    </button>
+                  </div>
+                )}
+
+                <div className="g-bill-monthly-break">
+                  <div><span className="g-bill-label">Monthly energy</span><strong>{billEstimator.monthlyEnergy.toFixed(1)} kWh</strong></div>
+                  <div><span className="g-bill-label">Monthly variable</span><strong>{formatCurrency(billEstimator.monthlyVariable, preferences.currency, preferences.region)}</strong></div>
+                  <div><span className="g-bill-label">Fixed charges</span><strong>{formatCurrency(billEstimator.fixedMonthly, preferences.currency, preferences.region)}</strong></div>
+                  <div className="g-bill-monthly-total"><span className="g-bill-label">Est. monthly bill</span><strong style={{ color: C.cyan }}>{formatCurrency(billEstimator.monthlyTotal, preferences.currency, preferences.region)}</strong></div>
+                </div>
+
+                {billEstimator.usingCustomRate && (
+                  <div className="g-bill-estimator-note">
+                    Using your custom {formatCurrency(plan.ratePerKwh, preferences.currency, preferences.region)}/kWh tariff — press reset to fall back to the auto tariff.
+                  </div>
+                )}
+
                 <div className="g-bill-estimator-footer">
                   <span>Optimal charging window: <strong>{plan.offPeakHours > 0 ? `${plan.offPeakHours.toFixed(1)}h` : "Standard rate"}</strong></span>
-                  <span>{billEstimator.shareOffPeak > 0 ? `${billEstimator.shareOffPeak.toFixed(0)}% off-peak` : "Peak priced"}</span>
+                  <span>
+                    {plan.offPeakSavings > 0
+                      ? `Save ${formatCurrency(plan.offPeakSavings, preferences.currency, preferences.region)} this session`
+                      : billEstimator.shareOffPeak > 0 ? `${billEstimator.shareOffPeak.toFixed(0)}% off-peak` : "Peak priced"}
+                  </span>
                 </div>
               </div>
 
@@ -3762,7 +4565,7 @@ function DriverChargePlannerPage({ preferences }) {
   );
 }
 
-function DriverSettingsPage({ preferences, setPreferences }) {
+function DriverSettingsPage({ preferences, setPreferences, minimalMode, onToggleMinimal }) {
   const [targetSoc, setTargetSoc] = useState(80);
   const [homeCharger, setHomeCharger] = useState(true);
   const [notify, setNotify] = useState(true);
@@ -3836,6 +4639,33 @@ function DriverSettingsPage({ preferences, setPreferences }) {
               onClick={() => setNotify(!notify)}
             ><span className="g-toggle-knob" /></button>
           </div>
+        </Card>
+        <Card title="Looks & feel" icon={Sparkles}>
+          <div className="g-field-block" style={{ marginBottom: 16 }}>
+            <span className="g-field-label">Theme</span>
+            <div className="g-seg">
+              <button
+                type="button"
+                className={`g-seg-btn ${!minimalMode ? "active" : ""}`}
+                onClick={() => minimalMode && onToggleMinimal && onToggleMinimal()}
+              ><Moon size={13} /> Dark</button>
+              <button
+                type="button"
+                className={`g-seg-btn ${minimalMode ? "active" : ""}`}
+                onClick={() => !minimalMode && onToggleMinimal && onToggleMinimal()}
+              ><Sun size={13} /> Light</button>
+            </div>
+          </div>
+          <div className="g-field-block" style={{ marginBottom: 6 }}>
+            <span className="g-field-label">Liquid glass · {preferences.glass ?? 70}%</span>
+            <input
+              type="range" min="0" max="100" step="5"
+              className="g-glass-slider"
+              value={preferences.glass ?? 70}
+              onChange={(e) => setPreferences((prev) => ({ ...prev, glass: Number(e.target.value) }))}
+            />
+          </div>
+          <p className="g-kpi-sub">Frosted-blur strength for cards, the sidebar and dialogs. Raise it for a softer liquid-glass look, lower it for clearer panels.</p>
         </Card>
       </div>
     </div>
@@ -4020,15 +4850,7 @@ function DriverAnalyticsPage({ onNavigate, preferences }) {
         <h2>Predictive insights</h2>
         <p>AI-powered predictions to optimize your charging and battery health.</p>
       </div>
-      {actionMessage && (
-        <div className="g-insight g-action-feedback" role="status">
-          <CheckCircle2 size={14} style={{ color: C.green, flexShrink: 0, marginTop: 2 }} />
-          <span>{actionMessage}</span>
-          <button type="button" className="g-feedback-dismiss" onClick={() => setActionMessage("")}>
-            <X size={14} />
-          </button>
-        </div>
-      )}
+      {actionMessage && <ActionFeedback message={actionMessage} onDismiss={() => setActionMessage("")} />}
 
       <div className="g-grid g-grid-4">
         <Kpi label="Prediction accuracy" value="94%" sub="Based on 6 months of data" icon={Target} accent={C.green} />
@@ -4217,11 +5039,11 @@ function DriverAnalyticsPage({ onNavigate, preferences }) {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
-              <Line type="monotone" dataKey="health" stroke={C.green} strokeWidth={2} dot={{ r: 3 }} name="Actual" />
+              <Line type="monotone" dataKey="health" stroke={C.green} strokeWidth={2} dot={{ r: 3 }} name="Actual" activeDot={CHART_ACTIVE_GREEN} />
               <Line type="monotone" dataKey="projected" stroke={C.cyan} strokeWidth={2} strokeDasharray="4 4" dot={false} name="Projected" />
               <XAxis dataKey="month" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} domain={[85, 100]} />
-              <Tooltip content={<ChartTooltip unit="%" />} />
+              <Tooltip content={<ChartTooltip unit="%" />} cursor={CHART_LINE_CURSOR} />
             </LineChart>
           </ResponsiveContainer>
           <div className="g-insight" style={{ marginTop: 12 }}>
@@ -4753,6 +5575,9 @@ function ChatbotAssistant({ role }) {
   const [aiBaseInput, setAiBaseInput] = useState(() => localStorage.getItem("gp_ai_base") || "https://api.openai.com/v1");
   const [aiNote, setAiNote] = useState("");
   const [prismOn, setPrismOn] = useState(false);
+  const [provider, setProvider] = useState("ollama");
+  const [aiReady, setAiReady] = useState(false);
+  const [aiStatus, setAiStatus] = useState(null);
   const listRef = useRef(null);
 
   const [sessionId] = useState(() => {
@@ -4769,17 +5594,41 @@ function ChatbotAssistant({ role }) {
       fetch(`${API_BASE_URL}/api/chat/config`)
         .then((r) => r.json())
         .then((cfg) => {
+          const isCloud = cfg?.provider === "cloud";
+          setProvider(isCloud ? "cloud" : "ollama");
           if (cfg?.ai || aiKey) {
             setAiMode("ai");
             setAiModel(cfg?.model || aiModelInput || "default");
           } else {
             setAiMode("local");
           }
+          if (cfg?.aiReady !== undefined) setAiReady(!!cfg.aiReady);
           setPrismOn(!!cfg?.prism);
         })
         .catch(() => setAiMode("local"));
     }
   }, [open, aiKey, aiModelInput]);
+
+  useEffect(() => {
+    if (!open || provider !== "ollama") return;
+    let stop = false;
+    let timer = 0;
+    const tick = async () => {
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/ai/status`);
+        const s = await r.json();
+        if (stop) return;
+        setAiStatus(s);
+        setAiReady(!!s.ready);
+        if (s.ready) return;
+        timer = setTimeout(tick, 2000);
+      } catch (_) {
+        if (!stop) timer = setTimeout(tick, 5000);
+      }
+    };
+    tick();
+    return () => { stop = true; clearTimeout(timer); };
+  }, [open, provider]);
 
   useEffect(() => {
     if (open && messages.length === 0) {
@@ -4795,6 +5644,20 @@ function ChatbotAssistant({ role }) {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages, busy]);
 
+  useEffect(() => {
+    const onPrompt = (e) => {
+      setOpen(true);
+      if (e.detail?.prompt) setInput(String(e.detail.prompt));
+    };
+    window.addEventListener("gp-chat-prompt", onPrompt);
+    return () => window.removeEventListener("gp-chat-prompt", onPrompt);
+  }, []);
+
+  const navigateTo = (page) => {
+    try { window.dispatchEvent(new CustomEvent("gp-navigate", { detail: { page } })); } catch { /* noop */ }
+    setOpen(false);
+  };
+
   const saveAiConfig = () => {
     localStorage.setItem("gp_ai_key", aiKey.trim());
     localStorage.setItem("gp_ai_model", aiModelInput.trim());
@@ -4802,6 +5665,11 @@ function ChatbotAssistant({ role }) {
     setAiMode(aiKey.trim() ? "ai" : "local");
     setAiNote("");
     setAiConfigOpen(false);
+  };
+
+  const retryAiSetup = () => {
+    fetch(`${API_BASE_URL}/api/ai/setup`, { method: "POST" }).catch(() => {});
+    setAiStatus((s) => ({ ...(s || {}), phase: "working", message: "Setting up Pulse AI…" }));
   };
 
   const send = async (preset) => {
@@ -4814,18 +5682,18 @@ function ChatbotAssistant({ role }) {
     let reply = chatReply(text, role);
     let mode = "local";
 
+    const payload = { message: text, history: messages.slice(-8), sessionId };
+    if (provider === "cloud") {
+      payload.apiKey = aiKey.trim() || undefined;
+      payload.baseURL = aiBaseInput.trim() || undefined;
+      payload.model = aiModelInput.trim() || undefined;
+    }
+
     try {
       const res = await fetch(`${API_BASE_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          history: messages.slice(-8),
-          apiKey: aiKey.trim() || undefined,
-          baseURL: aiBaseInput.trim() || undefined,
-          model: aiModelInput.trim() || undefined,
-          sessionId,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data?.mode === "ai" && data.reply) {
@@ -4834,17 +5702,21 @@ function ChatbotAssistant({ role }) {
         setAiModel(data.model || aiModel);
       }
       if (data?.note) setAiNote(data.note);
-      else if (mode === "local" && !aiKey) setAiNote("Offline knowledge mode — add an AI key in the assistant settings for smarter answers.");
+      else if (mode === "local" && provider !== "ollama" && !aiKey) setAiNote("Offline knowledge mode — add an AI key in the assistant settings for smarter answers.");
+      else if (mode === "local" && provider === "ollama") setAiNote("Pulse is answering from its local knowledge base while the AI engine finishes setup.");
     } catch (_) {
       setAiNote("Assistant server unavailable — using offline knowledge mode.");
     }
 
-    setMessages((prev) => [...prev, { from: "bot", text: reply }]);
+    setMessages((prev) => [
+      ...prev,
+      typeof reply === "object" && reply !== null && typeof reply.text === "string"
+        ? { from: "bot", text: reply.text, actions: reply.actions, chips: reply.chips }
+        : { from: "bot", text: String(reply) },
+    ]);
     setAiMode(mode);
     setBusy(false);
   };
-
-  const suggestions = ["Demo accounts", "OCPP gateway", "Charge planner", "Roadmap"];
 
   return (
     <>
@@ -4855,19 +5727,30 @@ function ChatbotAssistant({ role }) {
         title="Ask Pulse, the GRIDPULSE assistant"
         aria-label="Toggle chatbot assistant"
       >
-        {open ? <X size={20} /> : <MessageCircle size={20} />}
+        {open ? <X size={20} /> : <Sparkles size={22} />}
       </button>
 
       {open && (
         <div className="g-chat">
           <div className="g-chat-head">
-            <div className="g-chat-avatar"><Bot size={16} /></div>
-<div className="g-chat-head-main">
-                <div className="g-chat-title">Pulse · Assistant</div>
+            <div className="g-chat-avatar"><Sparkles size={17} /></div>
+            <div className="g-chat-head-main">
+                <div className="g-chat-title">Pulse<span className="g-chat-head-sub"> · GRIDPULSE</span></div>
                 <div className="g-chat-sub">
-                  <span className={`g-chat-live ${aiMode === "ai" ? "g-chat-live-ai" : ""}`} />
-                  {aiMode === "ai" ? `AI · ${aiModel || "connected"}` : "Offline knowledge"}
+                  <span className={`g-chat-live ${aiReady ? "g-chat-live-ai" : ""}`} />
+                  {provider === "cloud"
+                    ? (aiMode === "ai" ? `AI · ${aiModel || "connected"}` : "Offline knowledge")
+                    : aiReady
+                      ? `AI · ${(aiStatus && aiStatus.model) || "llama3:latest"} (local)`
+                      : aiStatus && aiStatus.phase === "failed"
+                        ? "AI setup required"
+                        : (aiStatus && aiStatus.message) || "Setting up Pulse AI…"}
                   {prismOn && <span className="g-chat-prism" title="PRISM tracing active">· PRISM</span>}
+                  {provider === "ollama" && !aiReady && aiStatus && aiStatus.phase === "failed" && (
+                    <button type="button" className="g-chat-retry" onClick={retryAiSetup} title="Retry AI setup">
+                      <RefreshCw size={10} /> Retry
+                    </button>
+                  )}
                 </div>
               </div>
             <button type="button" className="g-chat-gear" onClick={() => setAiConfigOpen((o) => !o)} title="AI settings">
@@ -4880,35 +5763,54 @@ function ChatbotAssistant({ role }) {
 
           {aiConfigOpen && (
             <div className="g-chat-aiconfig">
-              <label className="g-chat-ai-label">API key (any OpenAI-compatible provider)</label>
-              <input
-                type="password"
-                className="g-chat-ai-input"
-                value={aiKey}
-                onChange={(e) => setAiKey(e.target.value)}
-                placeholder="sk-…"
-                autoComplete="off"
-              />
-              <label className="g-chat-ai-label">Model</label>
-              <input
-                type="text"
-                className="g-chat-ai-input"
-                value={aiModelInput}
-                onChange={(e) => setAiModelInput(e.target.value)}
-                placeholder="gpt-4o-mini"
-              />
-              <label className="g-chat-ai-label">Base URL</label>
-              <input
-                type="text"
-                className="g-chat-ai-input"
-                value={aiBaseInput}
-                onChange={(e) => setAiBaseInput(e.target.value)}
-                placeholder="https://api.openai.com/v1"
-              />
-              <div className="g-chat-ai-actions">
-                <button type="button" className="g-chat-ai-save" onClick={saveAiConfig}>Save</button>
-                <span className="g-chat-ai-hint">Supports OpenAI, Groq, OpenRouter, Together, Ollama…</span>
-              </div>
+              {provider === "ollama" ? (
+                <>
+                  <div className="g-chat-ai-label">Local AI engine</div>
+                  <div className="g-chat-ai-info">
+                    Pulse runs fully on this device with Ollama <b>(llama3:latest)</b>.{" "}
+                    {aiReady
+                      ? "No API key, terminal commands or configuration needed."
+                      : "GRIDPULSE is provisioning it automatically in the background — load is downloaded once and reused on future launches."}
+                  </div>
+                  {!aiReady && aiStatus && aiStatus.phase === "failed" && (
+                    <div className="g-chat-ai-actions">
+                      <button type="button" className="g-chat-ai-save" onClick={retryAiSetup}>Retry AI setup</button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <label className="g-chat-ai-label">API key (any OpenAI-compatible provider)</label>
+                  <input
+                    type="password"
+                    className="g-chat-ai-input"
+                    value={aiKey}
+                    onChange={(e) => setAiKey(e.target.value)}
+                    placeholder="sk-…"
+                    autoComplete="off"
+                  />
+                  <label className="g-chat-ai-label">Model</label>
+                  <input
+                    type="text"
+                    className="g-chat-ai-input"
+                    value={aiModelInput}
+                    onChange={(e) => setAiModelInput(e.target.value)}
+                    placeholder="gpt-4o-mini"
+                  />
+                  <label className="g-chat-ai-label">Base URL</label>
+                  <input
+                    type="text"
+                    className="g-chat-ai-input"
+                    value={aiBaseInput}
+                    onChange={(e) => setAiBaseInput(e.target.value)}
+                    placeholder="https://api.openai.com/v1"
+                  />
+                  <div className="g-chat-ai-actions">
+                    <button type="button" className="g-chat-ai-save" onClick={saveAiConfig}>Save</button>
+                    <span className="g-chat-ai-hint">Supports OpenAI, Groq, OpenRouter, Together, Ollama…</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -4916,40 +5818,89 @@ function ChatbotAssistant({ role }) {
             <div className="g-chat-note">{aiNote}</div>
           )}
 
-          {messages.length === 1 && (
-            <div className="g-chat-suggestions">
-              {suggestions.map((s) => (
-                <button key={s} type="button" className="g-chat-suggestion" onClick={() => send(s)}>
-                  {s}
-                </button>
+          {messages.length === 1 ? (
+            <div className="g-chat-hero">
+              <div className="g-chat-hero-orb">
+                <Sparkles size={28} />
+              </div>
+              <div className="g-chat-hero-title">
+                Hi, I'm <span className="g-chat-grad">Pulse</span>
+              </div>
+              <div className="g-chat-hero-sub">
+                {role === "driver"
+                  ? "Your smart charging copilot — ask about stations, range, energy bills, the roadmap or demo accounts."
+                  : "Your fleet co-pilot — ask about gateways, protocols, alerts, theft protection or what's on the roadmap."}
+              </div>
+              <div className="g-chat-hero-chips">
+                {[
+                  { icon: Users, label: "Demo accounts" },
+                  { icon: Radio, label: "OCPP gateway" },
+                  { icon: Timer, label: "Charge planner" },
+                  { icon: Rocket, label: "Roadmap" },
+                ].map((c) => (
+                  <button key={c.label} type="button" className="g-chat-chip" onClick={() => send(c.label)}>
+                    <c.icon size={14} style={{ color: C.cyan, flexShrink: 0 }} />
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="g-chat-list" ref={listRef}>
+              {messages.slice(1).map((m, i) => (
+                <div className={`g-chat-msg ${m.from === "user" ? "g-chat-msg-user" : "g-chat-msg-bot"}`} key={i}>
+                  {m.from === "user" ? (
+                    <div className="g-chat-usertext">{m.text}</div>
+                  ) : (
+                    <>
+                      <div className="g-chat-msg-avatar"><Sparkles size={12} /></div>
+                      <div className="g-chat-reply">
+                        <div className="g-chat-bubble">{m.text}</div>
+                        {m.actions?.length > 0 && (
+                          <div className="g-chat-actions">
+                            {m.actions.map((a) => (
+                              <button
+                                key={a.page || a.label}
+                                type="button"
+                                className="g-chat-action"
+                                onClick={() => navigateTo(a.page)}
+                              >
+                                {a.label} <ChevronRight size={12} />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {m.chips?.length > 0 && (
+                          <div className="g-chat-followups">
+                            {m.chips.slice(0, 3).map((c) => (
+                              <button key={c} type="button" className="g-chat-chip-inline" onClick={() => send(c)}>{c}</button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
               ))}
+              {busy && (
+                <div className="g-chat-msg g-chat-msg-bot">
+                  <div className="g-chat-msg-avatar"><Sparkles size={12} /></div>
+                  <div className="g-chat-bubble g-chat-typing"><span /><span /><span /></div>
+                </div>
+              )}
             </div>
           )}
-
-          <div className="g-chat-list" ref={listRef}>
-            {messages.map((m, i) => (
-              <div className={`g-chat-msg ${m.from === "user" ? "g-chat-msg-user" : "g-chat-msg-bot"}`} key={i}>
-                {m.from === "bot" && <div className="g-chat-msg-avatar"><Bot size={12} /></div>}
-                <div className="g-chat-bubble">{m.text}</div>
-              </div>
-            ))}
-            {busy && (
-              <div className="g-chat-msg g-chat-msg-bot">
-                <div className="g-chat-msg-avatar"><Bot size={12} /></div>
-                <div className="g-chat-bubble g-chat-typing"><span /><span /><span /></div>
-              </div>
-            )}
-          </div>
 
           <form
             className="g-chat-input"
             onSubmit={(e) => { e.preventDefault(); send(); }}
           >
+            <span className="g-chat-input-ic"><Sparkles size={16} /></span>
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about navigation, protocols, accounts…"
+              placeholder="Ask Pulse anything…"
             />
             <button type="submit" className="g-chat-send" disabled={busy || !input.trim()}>
               <Send size={15} />
@@ -4961,11 +5912,35 @@ function ChatbotAssistant({ role }) {
   );
 }
 
-function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) {
-  const { loading, error } = useAppData();
+function DriverDashboard({ name, preferences, setPreferences, vehicleProfile, minimalMode, onToggleMinimal }) {
+  const { loading, error, refreshLive } = useAppData();
   const { nearbyChargers, driverMetrics: m } = useDriverData();
   const [page, setPage] = useState("overview");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const searchInputRef = useRef(null);
+  const [recentSearches, setRecentSearches] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("gp_recent_searches") || "[]"); } catch { return []; }
+  });
+  const geo = useGeolocation();
+  const [gpsAsk, setGpsAsk] = useState(false);
+
+  useEffect(() => {
+    if (geo.state !== "idle") return;
+    try {
+      if (localStorage.getItem("gp_gps_prompt_dismissed") === "1") return;
+    } catch { /* storage unavailable */ }
+    const t = setTimeout(() => setGpsAsk(true), 900);
+    return () => clearTimeout(t);
+  }, [geo.state]);
+
+  const decideGps = (allow) => {
+    try { localStorage.setItem("gp_gps_prompt_dismissed", "1"); } catch { /* noop */ }
+    setGpsAsk(false);
+    if (allow) geo.request();
+  };
 
   const navItems = [
     { key: "overview", label: "Overview", icon: LayoutDashboard },
@@ -4979,70 +5954,185 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
     { key: "settings", label: "Settings", icon: Settings },
   ];
 
-  // Search functionality
+  useEffect(() => {
+    const onNav = (e) => { if (e.detail?.page) setPage(e.detail.page); };
+    window.addEventListener("gp-navigate", onNav);
+    return () => window.removeEventListener("gp-navigate", onNav);
+  }, []);
+
+  useEffect(() => {
+    const onRefresh = () => setRefreshTick((v) => v + 1);
+    window.addEventListener("gp-refresh", onRefresh);
+    return () => window.removeEventListener("gp-refresh", onRefresh);
+  }, []);
+
+  // Spotlight search — broad index, relevance ranked, keyboard navigable.
   const searchResults = useMemo(() => {
-    if (!searchQuery || searchQuery.length < 2) return [];
+    const q = (searchQuery || "").trim();
+    if (!q) return [];
+    const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return [];
 
-    const query = searchQuery.toLowerCase();
-    const results = [];
+    const entries = [];
+    const push = (e) => { e.queryHighlight = q; entries.push(e); };
+    const pushIntent = (e) => { e.__intent = 1; e.queryHighlight = q; entries.push(e); };
 
-    // Search dashboards
-    navItems.forEach(item => {
-      if (item.label.toLowerCase().includes(query)) {
-        results.push({
-          type: 'dashboard',
-          key: item.key,
-          title: item.label,
-          description: `Navigate to ${item.label} dashboard`,
-        });
-      }
-    });
+    // Pages
+    navItems.forEach(item => push({
+      type: "dashboard",
+      key: item.key,
+      title: item.label,
+      sub: `Open ${item.label}`,
+      keyword: item.label,
+      group: "Pages",
+      action: () => setPage(item.key),
+    }));
 
-    // Search chargers
-    nearbyChargers.forEach(charger => {
-      if (charger.name.toLowerCase().includes(query) || 
-          charger.status.toLowerCase().includes(query)) {
-        results.push({
-          type: 'charger',
-          title: charger.name,
-          description: `${charger.distance} · ${charger.price}`,
-          status: charger.status,
-          action: () => setPage('chargers'),
-        });
-      }
-    });
+    // Chargers
+    nearbyChargers.forEach(charger => push({
+      type: "charger",
+      title: charger.name,
+      sub: `${charger.distance} · ${charger.price}`,
+      keyword: `${charger.name} ${charger.status} ${charger.distance} ${charger.price}`,
+      badge: charger.status,
+      badgeColor: charger.status === "available" ? C.green : charger.status === "busy" ? C.amber : C.red,
+      group: "Chargers",
+      action: () => setPage("chargers"),
+    }));
 
-    // Search data/metrics
+    // Metrics
     const metrics = [
-      { key: 'monthKwh', title: 'Monthly Energy', description: `${m?.monthKwh?.value} this month` },
-      { key: 'monthSpend', title: 'Monthly Spend', description: `${m?.monthSpend?.value} this month` },
-      { key: 'estRangeKm', title: 'Estimated Range', description: `${m?.estRangeKm?.value} remaining` },
-      { key: 'co2Avoided', title: 'CO2 Avoided', description: `${m?.co2Avoided?.value} lifetime` },
+      { key: "monthKwh", title: "Monthly Energy", sub: `${m?.monthKwh?.value ?? "—"} this month`, kw: "energy kwh monthly usage" },
+      { key: "monthSpend", title: "Monthly Spend", sub: `${m?.monthSpend?.value ?? "—"} this month`, kw: "cost money spend monthly" },
+      { key: "estRangeKm", title: "Estimated Range", sub: `${m?.estRangeKm?.value ?? "—"} remaining`, kw: "range km battery distance" },
+      { key: "co2Avoided", title: "CO2 Avoided", sub: `${m?.co2Avoided?.value ?? "—"} lifetime`, kw: "co2 carbon emissions green" },
+      { key: "nextBill", title: "Next bill estimate", sub: `${m?.nextBillEstimate?.value ?? "—"} ${m?.nextBillEstimate?.sub ?? ""}`, kw: "bill estimate cost price" },
     ];
+    metrics.forEach(metric => push({
+      type: "data",
+      key: metric.key,
+      title: metric.title,
+      sub: metric.sub,
+      keyword: `${metric.title} ${metric.kw}`,
+      group: "Metrics",
+      action: () => setPage("overview"),
+    }));
 
-    metrics.forEach(metric => {
-      if (metric.title.toLowerCase().includes(query) || 
-          metric.description?.toLowerCase().includes(query)) {
-        results.push({
-          type: 'data',
-          key: metric.key,
-          title: metric.title,
-          description: metric.description,
-          action: () => setPage('overview'),
-        });
-      }
+    // Vehicle + quick actions
+    const vmake = vehicleProfile?.manufacturer, vmodel = vehicleProfile?.model, vtrim = vehicleProfile?.trim;
+    push({
+      type: "action",
+      title: vmake ? `${vmake} ${vmodel || ""}`.trim() : "My vehicle",
+      sub: `SOC ${vehicleProfile?.currentSoc ?? "—"}% · open the garage`,
+      keyword: `${vmake || ""} ${vmodel || ""} ${vtrim || ""} soc battery vehicle car garage plate`,
+      icon: <Car size={14} />,
+      group: "Vehicle & actions",
+      action: () => setPage("garage"),
     });
+    const tips = [
+      { title: "Bill estimator", sub: "Projected monthly charging cost", kw: "bill money monthly cost estimate", icon: <CreditCard size={14} />, go: () => setPage("planner") },
+      { title: "Find a charger near me", sub: "Browse all stations", kw: "chargers stations map gps nearby", icon: <MapPin size={14} />, go: () => setPage("chargers") },
+      { title: "Set a charging schedule", sub: "Plan the next session", kw: "schedule timer planner plan", icon: <Timer size={14} />, go: () => setPage("planner") },
+      { title: "Battery health", sub: "Degradation & state of health", kw: "battery soh health cells", icon: <Battery size={14} />, go: () => setPage("battery") },
+      { title: "Predictive insights", sub: "Smart charging recommendations", kw: "insights predictions analytics ai", icon: <Sparkles size={14} />, go: () => setPage("analytics") },
+      { title: "Charging history", sub: "Past sessions & invoices", kw: "history past sessions invoices log", icon: <History size={14} />, go: () => setPage("history") },
+      { title: "Settings", sub: "Theme, region & preferences", kw: "settings theme preferences region", icon: <Settings size={14} />, go: () => setPage("settings") },
+    ];
+    tips.forEach(t => push({ type: "action", title: t.title, sub: t.sub, keyword: t.kw, icon: t.icon, group: "Vehicle & actions", action: t.go }));
 
-    return results;
-  }, [searchQuery, navItems, nearbyChargers, m]);
+    // Natural-language intents — "nearest ev station", "how much is my bill"…
+    const intents = matchSearchIntents(q);
+    const askPulse = (prompt) => { try { window.dispatchEvent(new CustomEvent("gp-chat-prompt", { detail: { prompt } })); } catch { /* noop */ } };
+    if (intents.includes("chargers")) {
+      nearbyChargers.slice(0, 4).forEach(c => pushIntent({
+        type: "charger", title: c.name, sub: `${c.distance} away · ${c.price} · ${c.status}`,
+        keyword: `${c.name} nearest nearby closest station charger near me ev charging map`,
+        badge: c.status, badgeColor: c.status === "available" ? C.green : c.status === "busy" ? C.amber : C.red,
+        group: "Chargers", action: () => setPage("chargers"),
+      }));
+      pushIntent({ type: "action", title: "Open the charger map", sub: "See all stations with live availability", keyword: "nearest nearby station charger map show all", icon: <MapPin size={14} />, group: "Quick actions", action: () => setPage("chargers") });
+    }
+    if (intents.includes("bill")) pushIntent({ type: "data", title: "Your next bill estimate", sub: `${m?.nextBillEstimate?.value ?? "—"} ${m?.nextBillEstimate?.sub ?? ""}`, keyword: "bill cost spend how much money price charged", group: "Metrics", action: () => setPage("overview") });
+    if (intents.includes("battery")) pushIntent({ type: "action", title: "Battery health", sub: `SoC now ${vehicleProfile?.currentSoc ?? "—"}% · open Battery health`, keyword: "battery health degradation soh capacity soc status", icon: <Battery size={14} />, group: "Quick actions", action: () => setPage("battery") });
+    if (intents.includes("planner")) pushIntent({ type: "action", title: "Plan a charging session", sub: "Pick the cheapest, greenest window", keyword: "schedule planner plan when to charge time", icon: <Timer size={14} />, group: "Quick actions", action: () => setPage("planner") });
+    if (intents.includes("range")) pushIntent({ type: "data", title: "Estimated range", sub: `${m?.estRangeKm?.value ?? "—"} with current charge`, keyword: "range how far drive distance", group: "Metrics", action: () => setPage("overview") });
+    if (intents.includes("roadmap")) pushIntent({ type: "action", title: "What's on the roadmap?", sub: "Upcoming phases & releases", keyword: "roadmap upcoming features releases new", icon: <Rocket size={14} />, group: "Quick actions", action: () => setPage("roadmap") });
+    if (intents.includes("history")) pushIntent({ type: "action", title: "Charging history", sub: "Past sessions & invoices", keyword: "history sessions past invoices", icon: <History size={14} />, group: "Quick actions", action: () => setPage("history") });
+    if (intents.includes("settings")) pushIntent({ type: "action", title: "Settings", sub: "Theme, region & preferences", keyword: "settings preferences currency region theme", icon: <Settings size={14} />, group: "Quick actions", action: () => setPage("settings") });
+    if (intents.includes("accounts")) pushIntent({ type: "action", title: "Demo accounts", sub: "Driver TN84DR5021 · Owner GRIDPULSE", keyword: "demo account login password sign in", icon: <Users size={14} />, group: "Quick actions", action: () => askPulse("Demo accounts") });
+    if (intents.includes("insights")) pushIntent({ type: "action", title: "Predictive insights", sub: "Smart charging recommendations", keyword: "insights predict forecast trends", icon: <Sparkles size={14} />, group: "Quick actions", action: () => setPage("analytics") });
+    if (intents.includes("gateway") || intents.includes("alerts") || intents.includes("grid") || intents.includes("theft")) {
+      pushIntent({ type: "action", title: "Ask Pulse about this", sub: "Get the full answer from the assistant", keyword: "ask pulse ocpp gateway protocol alerts grid theft", icon: <Sparkles size={14} />, group: "Quick actions", action: () => askPulse(q) });
+    }
+
+    const ranked = entries
+      .map(e => { const base = spotlightScore(e, tokens); return { e, s: base === 0 && e.__intent ? 3 : base }; })
+      .filter(x => x.s > 0)
+      .sort((a, b) => b.s - a.s);
+
+    if (!ranked.length && q.length >= 3) {
+      ranked.push({ s: 3, e: { type: "action", title: `Ask Pulse: “${q}”`, sub: "Let the assistant answer this for you", keyword: q, icon: <Sparkles size={14} />, queryHighlight: "", group: "Quick actions", action: () => askPulse(q) } });
+    }
+
+    return ranked.map(x => x.e);
+  }, [searchQuery, navItems, nearbyChargers, m, vehicleProfile]);
+
+  const searchSections = useMemo(() => {
+    const secs = [];
+    const hasQuery = searchQuery.trim().length >= 1;
+    if (!hasQuery && searchFocused && recentSearches.length) {
+      secs.push({
+        label: "Recent",
+        items: recentSearches.slice(0, 5).map(r => ({
+          type: "action",
+          title: `“${r.text}”`,
+          sub: "Search again",
+          icon: <Clock size={14} />,
+          queryHighlight: "",
+          action: () => setSearchQuery(r.text),
+        })),
+      });
+    }
+    if (hasQuery) {
+      ["Pages", "Chargers", "Metrics", "Vehicle & actions", "Quick actions"].forEach(label => {
+        const items = searchResults.filter(r => r.group === label);
+        if (items.length) secs.push({ label, items });
+      });
+    }
+    return secs;
+  }, [searchQuery, searchResults, searchFocused, recentSearches]);
+
+  useEffect(() => { setActiveIdx(0); }, [searchQuery, searchResults, recentSearches, searchFocused]);
+
+  const handleSearchKeyDown = (e) => {
+    const flat = searchSections.flatMap(s => s.items);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx(i => flat.length ? (i + 1) % flat.length : 0);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx(i => flat.length ? (i - 1 + flat.length) % flat.length : 0);
+    } else if (e.key === "Enter") {
+      if (flat[activeIdx]) { e.preventDefault(); handleSearchResultSelect(flat[activeIdx]); }
+    } else if (e.key === "Escape") {
+      setSearchQuery(""); setSearchFocused(false); e.currentTarget.blur();
+    }
+  };
 
   const handleSearchResultSelect = (result) => {
+    const query = searchQuery.trim();
+    if (query) {
+      const next = [{ text: query, time: Date.now() }, ...recentSearches.filter(r => r.text !== query)].slice(0, 6);
+      setRecentSearches(next);
+      try { localStorage.setItem("gp_recent_searches", JSON.stringify(next)); } catch { /* noop */ }
+    }
     if (result.action) {
       result.action();
     } else if (result.key) {
       setPage(result.key);
     }
     setSearchQuery("");
+    setSearchFocused(false);
   };
 
   if (loading) return <DashboardLoadState />;
@@ -5057,43 +6147,74 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
         bottom={<SidebarCarPanel vehicleProfile={vehicleProfile} soc={vehicleProfile?.currentSoc} onNavigate={setPage} />}
       />
       <main className="g-main">
+        <PullToRefresh onRefresh={() => { setRefreshTick((v) => v + 1); refreshLive(); }}>
         <div className="g-search-wrapper">
           <div className="g-search-bar">
             <Search size={16} style={{ color: C.textDimmer }} />
             <input
+              ref={searchInputRef}
               type="text"
-              placeholder="Search dashboards, chargers, or data..."
+              placeholder="Spotlight — search anything…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              onKeyDown={handleSearchKeyDown}
             />
             {searchQuery && (
-              <button 
+              <button
                 className="g-search-clear"
-                onClick={() => setSearchQuery("")}
+                onClick={() => { setSearchQuery(""); setActiveIdx(0); }}
               >
                 <X size={14} />
               </button>
             )}
           </div>
-          {searchQuery && searchResults.length > 0 && (
-            <SearchResults 
-              query={searchQuery}
-              results={searchResults}
-              onClose={() => setSearchQuery("")}
-              onSelectResult={handleSearchResultSelect}
+          {(searchSections.some(s => s.items.length)) && (
+            <SearchResults
+              sections={searchSections}
+              activeIdx={activeIdx}
+              onHoverItem={setActiveIdx}
+              onSelectItem={handleSearchResultSelect}
             />
           )}
         </div>
+        <div key={`${page}:${refreshTick}`} className="g-page-enter">
         {page === "overview" && <DriverOverviewPage name={name} preferences={preferences} vehicleProfile={vehicleProfile} />}
         {page === "garage" && <DriverGaragePage preferences={preferences} vehicleProfile={vehicleProfile} />}
-        {page === "planner" && <DriverChargePlannerPage preferences={preferences} />}
+        {page === "planner" && <DriverChargePlannerPage preferences={preferences} vehicleProfile={vehicleProfile} />}
         {page === "history" && <DriverHistoryPage preferences={preferences} />}
         {page === "battery" && <DriverBatteryPage vehicleProfile={vehicleProfile} />}
         {page === "chargers" && <DriverChargersPage preferences={preferences} />}
         {page === "analytics" && <DriverAnalyticsPage onNavigate={setPage} preferences={preferences} />}
         {page === "roadmap" && <RoadmapPage />}
-        {page === "settings" && <DriverSettingsPage preferences={preferences} setPreferences={setPreferences} />}
+        {page === "settings" && <DriverSettingsPage preferences={preferences} setPreferences={setPreferences} minimalMode={minimalMode} onToggleMinimal={onToggleMinimal} />}
+        </div>
+        </PullToRefresh>
       </main>
+
+      {gpsAsk && geo.state === "idle" && (
+        <div className="g-gps-overlay" onClick={() => decideGps(false)}>
+          <div className="g-gps-prompt" onClick={(e) => e.stopPropagation()}>
+            <div className="g-gps-prompt-icon">
+              <LocateFixed size={26} style={{ color: C.cyan }} />
+            </div>
+            <h3>Enable GPS for GRIDPULSE?</h3>
+            <p>
+              Sharing your location re-sorts nearby chargers by real road distance, pulls live
+              local weather into your charge plan, and sharpens the bill estimate.
+            </p>
+            <div className="g-gps-prompt-actions">
+              <button type="button" className="g-gps-prompt-btn ghost" onClick={() => decideGps(false)}>
+                Not now
+              </button>
+              <button type="button" className="g-gps-prompt-btn primary" onClick={() => decideGps(true)}>
+                <LocateFixed size={14} /> Enable
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5102,7 +6223,18 @@ function DriverDashboard({ name, preferences, setPreferences, vehicleProfile }) 
 /*  Owner — page bodies                                              */
 /* ---------------------------------------------------------------- */
 function OwnerGatewayPage() {
-  const { live, liveConnected } = useLiveData();
+  const { live, liveConnected, refreshLive } = useLiveData();
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState(null);
+
+  const handleRefresh = () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    refreshLive().finally(() => {
+      setRefreshing(false);
+      setLastRefresh(new Date());
+    });
+  };
 
   const src = (key) => live?.sources?.[key] || { status: "standby", detail: "Waiting for connection", count: 0, name: key };
 
@@ -5137,7 +6269,44 @@ function OwnerGatewayPage() {
     switch (sourceKey) {
       case "ocpp": {
         const stations = snap.stations || [];
-        if (!stations.length) return <p className="g-kpi-sub">No OCPP charge points connected yet.</p>;
+        if (!stations.length) return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "4px 0" }}>
+            <p className="g-kpi-sub" style={{ margin: 0 }}>No OCPP charge points connected yet.</p>
+            <div style={{
+              background: "rgba(79,227,255,0.05)", border: "1px solid rgba(79,227,255,0.2)",
+              borderRadius: 8, padding: "10px 12px",
+            }}>
+              <p className="g-mono" style={{ fontSize: 11, color: C.textDim, marginBottom: 6 }}>
+                Point a charger or simulator at:
+              </p>
+              <p className="g-mono" style={{ fontSize: 11.5, color: C.cyan, marginBottom: 8, wordBreak: "break-all" }}>
+                {wsBaseUrl()}/ocpp/&#123;stationId&#125;
+              </p>
+              <p className="g-mono" style={{ fontSize: 11, color: C.textDimmer, marginBottom: 8 }}>
+                or run the built-in sim:
+              </p>
+              <code style={{
+                display: "block", background: "rgba(0,0,0,0.3)", borderRadius: 6,
+                padding: "7px 10px", fontSize: 11, color: C.green, marginBottom: 10,
+              }}>node scripts/ocpp-sim.js</code>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "6px 14px", borderRadius: 8,
+                  background: "rgba(79,227,255,0.08)",
+                  border: "1px solid rgba(79,227,255,0.3)",
+                  color: C.cyan, fontSize: 11.5, fontFamily: "var(--mono)",
+                  cursor: "pointer",
+                }}
+              >
+                <RefreshCw size={12} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
+                Check for connections
+              </button>
+            </div>
+          </div>
+        );
         return stations.map((st) => {
           const c = st.connectors?.[0] || {};
           return (
@@ -5251,9 +6420,30 @@ function OwnerGatewayPage() {
                 Endpoint: <span className="g-mono">{ENDPOINT_LABEL}</span> · SSE stream + OCPP WebSocket on the same host.
               </p>
             </div>
-            <span className={`g-live-pill ${liveConnected ? "g-live-pill-on" : ""}`}>
-              <span className="g-live-pill-dot" /> {liveConnected ? "Live" : "Offline"}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button
+                type="button"
+                onClick={handleRefresh}
+                title="Refresh live snapshot"
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "6px 14px", borderRadius: 8,
+                  background: "rgba(79,227,255,0.08)",
+                  border: "1px solid rgba(79,227,255,0.3)",
+                  color: C.cyan, fontSize: 12, fontFamily: "var(--mono)",
+                  cursor: "pointer", transition: "all .2s",
+                }}
+              >
+                <RefreshCw size={13} style={{ animation: refreshing ? "spin 0.8s linear infinite" : "none" }} />
+                {refreshing ? "Refreshing…" : "Refresh"}
+              </button>
+              <span className={`g-live-pill ${liveConnected ? "g-live-pill-on" : ""}`}>
+                <span className="g-live-pill-dot" /> {liveConnected ? "Live" : "Offline"}
+              </span>
+              {lastRefresh && !refreshing && (
+                <span className="g-kpi-sub g-mono" style={{ margin: 0 }}>Updated {lastRefresh.toLocaleTimeString()}</span>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -5391,8 +6581,8 @@ function OwnerOverviewPage({ preferences }) {
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="day" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<ChartTooltip unit=" kWh" />} />
-              <Area type="monotone" dataKey="kwh" stroke={C.cyan} fill="url(#gEnergy)" strokeWidth={2} name="Energy" />
+              <Tooltip content={<ChartTooltip unit=" kWh" />} cursor={CHART_LINE_CURSOR} />
+              <Area type="monotone" dataKey="kwh" stroke={C.cyan} fill="url(#gEnergy)" strokeWidth={2} name="Energy" activeDot={CHART_ACTIVE_DOT} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -5407,8 +6597,8 @@ function OwnerOverviewPage({ preferences }) {
               </defs>
               <XAxis dataKey="hour" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis hide />
-              <Tooltip content={<ChartTooltip unit=" kW" />} />
-              <Area type="monotone" dataKey="demand" stroke={C.amber} fill="url(#gDemandSmall)" strokeWidth={2} name="Demand" />
+              <Tooltip content={<ChartTooltip unit=" kW" />} cursor={CHART_CURSOR_AMBER} />
+              <Area type="monotone" dataKey="demand" stroke={C.amber} fill="url(#gDemandSmall)" strokeWidth={2} name="Demand" activeDot={CHART_ACTIVE_AMBER} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -5454,7 +6644,7 @@ function OwnerOverviewPage({ preferences }) {
             <BarChart data={siteUtilization} layout="vertical" margin={{ left: 10 }}>
               <XAxis type="number" hide domain={[0, 100]} />
               <YAxis dataKey="site" type="category" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} width={78} />
-              <Tooltip content={<ChartTooltip unit="%" />} cursor={{ fill: "rgba(79,227,255,0.06)" }} />
+              <Tooltip content={<ChartTooltip unit="%" />} cursor={{ fill: `${C.cyan}11` }} />
               <Bar dataKey="util" fill={C.cyan} radius={[0, 4, 4, 0]} name="Utilization" />
             </BarChart>
           </ResponsiveContainer>
@@ -5508,7 +6698,13 @@ function OwnerChargingPage({ ocppStatus, ocppProtocol, respondingCount, testOcpp
         <Card title="OCPP network" icon={Plug}>
           <div className="g-ocpp-ops-status">
             <div>
-              <div className="g-kpi-value" style={{ fontSize: 22, color: ocppStatus === "connected" ? C.green : ocppStatus === "testing" ? C.amber : C.text }}>{ocppStatus === "connected" ? "Connected" : ocppStatus === "testing" ? "Testing" : "Not connected"}</div>
+              <div className="g-ocpp-status-line">
+                <span
+                  className={`g-dot ${ocppStatus === "testing" ? "g-dot-pulse" : ""}`}
+                  style={{ background: ocppStatus === "connected" ? C.green : ocppStatus === "testing" ? C.amber : C.textDimmer, "--dotc": ocppStatus === "connected" ? C.green : ocppStatus === "testing" ? C.amber : C.textDimmer }}
+                />
+                <div className="g-kpi-value" style={{ fontSize: 22, color: ocppStatus === "connected" ? C.green : ocppStatus === "testing" ? C.amber : C.text }}>{ocppStatus === "connected" ? "Connected" : ocppStatus === "testing" ? "Testing" : "Not connected"}</div>
+              </div>
               <div className="g-kpi-sub">{ocppProtocol} · {respondingCount} of {fleetChargers.length} chargers responding</div>
             </div>
             <button type="button" className="g-btn-primary g-ocpp-btn" onClick={testOcppConnection} disabled={ocppStatus === "testing"}>
@@ -5583,7 +6779,7 @@ function OwnerChargingPage({ ocppStatus, ocppProtocol, respondingCount, testOcpp
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="hour" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<ChartTooltip unit=" sessions" />} cursor={{ fill: "rgba(79,227,255,0.06)" }} />
+              <Tooltip content={<ChartTooltip unit=" sessions" />} cursor={{ fill: `${C.cyan}11` }} />
               <Bar dataKey="sessions" fill={C.cyan} radius={[4, 4, 0, 0]} name="Sessions" />
             </BarChart>
           </ResponsiveContainer>
@@ -5593,7 +6789,7 @@ function OwnerChargingPage({ ocppStatus, ocppProtocol, respondingCount, testOcpp
             <BarChart data={siteUtilization} layout="vertical" margin={{ left: 10 }}>
               <XAxis type="number" hide domain={[0, 100]} />
               <YAxis dataKey="site" type="category" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} width={78} />
-              <Tooltip content={<ChartTooltip unit="%" />} cursor={{ fill: "rgba(79,227,255,0.06)" }} />
+              <Tooltip content={<ChartTooltip unit="%" />} cursor={{ fill: `${C.cyan}11` }} />
               <Bar dataKey="util" fill={C.green} radius={[0, 4, 4, 0]} name="Utilization" />
             </BarChart>
           </ResponsiveContainer>
@@ -5663,7 +6859,7 @@ function OwnerGridPage({ preferences }) {
               <XAxis dataKey="hour" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip content={<ChartTooltip unit=" kW" />} />
-              <Area type="monotone" dataKey="demand" stroke={C.amber} fill="url(#gDemand)" strokeWidth={2} name="Demand" />
+              <Area type="monotone" dataKey="demand" stroke={C.amber} fill="url(#gDemand)" strokeWidth={2} name="Demand" activeDot={CHART_ACTIVE_AMBER} />
               <Line type="monotone" dataKey="capacity" stroke={C.textDimmer} strokeDasharray="4 4" strokeWidth={1.5} dot={false} name="Capacity" />
             </AreaChart>
           </ResponsiveContainer>
@@ -5673,7 +6869,7 @@ function OwnerGridPage({ preferences }) {
             <BarChart data={costSplit} layout="vertical" margin={{ left: 10 }}>
               <XAxis type="number" hide />
               <YAxis dataKey="band" type="category" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} width={64} />
-              <Tooltip content={<ChartTooltip unit=" $" />} cursor={{ fill: "rgba(79,227,255,0.06)" }} />
+              <Tooltip content={<ChartTooltip unit=" $" />} cursor={{ fill: `${C.cyan}11` }} />
               <Bar dataKey="cost" fill={C.cyan} radius={[0, 4, 4, 0]} name="Cost" />
             </BarChart>
           </ResponsiveContainer>
@@ -5781,10 +6977,10 @@ function OwnerBatteryPage() {
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={fleetHealthTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
-              <Line type="monotone" dataKey="health" stroke={C.green} strokeWidth={2} dot={{ r: 3 }} />
+              <Line type="monotone" dataKey="health" stroke={C.green} strokeWidth={2} dot={{ r: 3 }} activeDot={CHART_ACTIVE_GREEN} />
               <XAxis dataKey="month" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} domain={[90, 100]} />
-              <Tooltip content={<ChartTooltip unit="%" />} />
+              <Tooltip content={<ChartTooltip unit="%" />} cursor={CHART_LINE_CURSOR} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -5793,7 +6989,7 @@ function OwnerBatteryPage() {
             <BarChart data={healthDistribution} layout="vertical" margin={{ left: 10 }}>
               <XAxis type="number" hide />
               <YAxis dataKey="band" type="category" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} width={58} />
-              <Tooltip content={<ChartTooltip unit=" chargers" />} cursor={{ fill: "rgba(79,227,255,0.06)" }} />
+              <Tooltip content={<ChartTooltip unit=" chargers" />} cursor={{ fill: `${C.cyan}11` }} />
               <Bar dataKey="count" fill={C.green} radius={[0, 4, 4, 0]} name="Chargers" />
             </BarChart>
           </ResponsiveContainer>
@@ -5821,10 +7017,43 @@ function OwnerBatteryPage() {
 function OwnerAlertsPage() {
   const { anomalies, alertTrend, maintenanceQueue } = useOwnerData();
   const { live, liveConnected } = useLiveData();
+  const [alertFilter, setAlertFilter] = useState("all");
+  const [expandedAlert, setExpandedAlert] = useState(null);
+  const [acknowledged, setAcknowledged] = useState([]);
+  const [expandedMaint, setExpandedMaint] = useState(null);
+  const [scheduledMaint, setScheduledMaint] = useState([]);
+  const [actionMessage, setActionMessage] = useState("");
   const high = anomalies.filter((a) => a.severity === "high").length;
   const medium = anomalies.filter((a) => a.severity === "medium").length;
   const low = anomalies.filter((a) => a.severity === "low").length;
   const overdue = maintenanceQueue.filter((m) => m.due === "Overdue").length;
+
+  const visibleAnomalies = anomalies.filter((a) => alertFilter === "all" || a.severity === alertFilter);
+  const alertChips = [
+    { key: "all", label: `All ${anomalies.length}` },
+    { key: "high", label: `High ${high}` },
+    { key: "medium", label: `Medium ${medium}` },
+    { key: "low", label: `Low ${low}` },
+  ];
+  const severityColor = (sev) => (sev === "high" ? C.red : sev === "medium" ? C.amber : C.textDim);
+  const severityBadge = (sev) => (sev === "high" ? "critical" : sev === "medium" ? "warning" : "healthy");
+
+  const acknowledgeAlert = (a) => {
+    setAcknowledged((cur) => (cur.includes(a.charger) ? cur : [...cur, a.charger]));
+    setExpandedAlert(null);
+    setActionMessage(`Alert ${a.charger} acknowledged — it stays visible until resolved.`);
+  };
+  const openTicket = (a) => setActionMessage(`Ticket opened for ${a.charger} (${a.type || a.severity}) — routed to operations.`);
+  const scheduleService = (m) => {
+    setScheduledMaint((cur) => (cur.includes(m.charger) ? cur : [...cur, m.charger]));
+    setExpandedMaint(null);
+    setActionMessage(`${m.task} for ${m.charger} scheduled with the ${m.site} crew.`);
+  };
+  const orderPart = (m) => setActionMessage(`"${m.part || "replacement part"}" ordered for ${m.charger} — ETA 2 days.`);
+  const assignCrew = (m) => setActionMessage(`Crew assigned to ${m.charger} at ${m.site}.`);
+  const detailChip = (label, value) => (
+    <div className="g-smart-chip" key={label}><span className="g-smart-chip-l">{label}</span><span className="g-cost-value g-mono">{value}</span></div>
+  );
 
   // Realtime anomalies straight from the protocol feeds.
   const liveEvents = useMemo(() => {
@@ -5863,6 +7092,7 @@ function OwnerAlertsPage() {
         <h2>Alerts &amp; maintenance</h2>
         <p>Anomalies detected across telemetry, and what's queued for service.</p>
       </div>
+      {actionMessage && <ActionFeedback message={actionMessage} onDismiss={() => setActionMessage("")} />}
       <div className="g-grid g-grid-4">
         <Kpi label="High severity" value={high} sub="Historical flags" icon={AlertTriangle} accent={C.red} />
         <Kpi label="Medium severity" value={medium} sub="Historical flags" icon={AlertTriangle} accent={C.amber} />
@@ -5894,8 +7124,9 @@ function OwnerAlertsPage() {
       )}
 
       <div className="g-grid g-grid-3" style={{ marginTop: 18 }}>
-        <Card title="Alerts this week" icon={TrendingUp} style={{ gridColumn: "span 2" }}>
-          <ResponsiveContainer width="100%" height={170}>
+        <Card title="Alerts this week" icon={TrendingUp} style={{ gridColumn: "span 2", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minHeight: 170, position: "relative" }}>
+          <ResponsiveContainer width="100%" height="100%">
             <BarChart data={alertTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="day" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -5904,39 +7135,150 @@ function OwnerAlertsPage() {
               <Bar dataKey="count" fill={C.red} radius={[4, 4, 0, 0]} name="Alerts" />
             </BarChart>
           </ResponsiveContainer>
+          </div>
         </Card>
-        <Card title="Anomaly flags" icon={ShieldAlert}>
-          <div className="g-list">
-            {anomalies.map((a, i) => (
-              <div className="g-list-row" key={i} style={{ alignItems: "flex-start" }}>
-                <div className="g-list-main" style={{ alignItems: "flex-start" }}>
-                  <AlertTriangle size={14} style={{
-                    color: a.severity === "high" ? C.red : a.severity === "medium" ? C.amber : C.textDim,
-                    marginTop: 2, flexShrink: 0,
-                  }} />
-                  <span><span className="g-mono">{a.charger}</span> — {a.detail}</span>
-                </div>
-                <span className="g-list-sub">{a.time}</span>
-              </div>
+        <Card title="Anomaly flags" icon={ShieldAlert} action={
+          <span className="g-horizon-chips" style={{ gap: 4 }}>
+            {alertChips.map((chip) => (
+              <button
+                type="button"
+                key={chip.key}
+                className={`g-chip ${alertFilter === chip.key ? "g-chip-active" : ""}`}
+                onClick={() => setAlertFilter(chip.key)}
+              >
+                {chip.label}
+              </button>
             ))}
+          </span>
+        }>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {visibleAnomalies.map((a, i) => {
+              const isAck = acknowledged.includes(a.charger);
+              const isOpen = expandedAlert === i;
+              return (
+                <div key={a.charger} style={{
+                  border: `1px solid ${isAck ? C.borderSoft : `${severityColor(a.severity)}44`}`,
+                  background: isAck ? "transparent" : `${severityColor(a.severity)}0e`,
+                  borderRadius: 10,
+                  opacity: isAck ? 0.55 : 1,
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedAlert(isOpen ? null : i)}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", gap: 8,
+                      padding: "9px 10px", background: "transparent", border: "none",
+                      cursor: "pointer", textAlign: "left", color: C.text, font: "inherit", borderRadius: 10,
+                    }}
+                  >
+                    <AlertTriangle size={14} style={{ color: severityColor(a.severity), flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span className="g-mono">{a.charger}</span>
+                      {isAck && <span style={{ marginLeft: 6, display: "inline-block" }}><Badge status="healthy">ack</Badge></span>}
+                      <span style={{ display: "block", color: C.textDim, fontSize: 12 }}>{a.detail}</span>
+                    </span>
+                    <Badge status={severityBadge(a.severity)}>{a.severity}</Badge>
+                    <span className="g-list-sub">{a.time}</span>
+                    <ChevronDown size={14} style={{ color: C.textDimmer, flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none" }} />
+                  </button>
+                  {isOpen && (
+                    <div style={{ padding: "2px 10px 12px 32px" }}>
+                      <div className="g-smart-charge-grid" style={{ gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+                        {detailChip("Type", a.type || "—")}
+                        {detailChip("Site", a.site || "—")}
+                        {detailChip("Status", isAck ? "Acknowledged" : a.status || "Open")}
+                      </div>
+                      <p className="g-kpi-sub" style={{ margin: "10px 0", color: C.textDim }}>
+                        <strong style={{ color: C.text }}>Recommended:</strong> {a.recommendation || "Review telemetry before acting."}
+                      </p>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button type="button" className="g-btn-ghost g-btn-sm" onClick={() => acknowledgeAlert(a)}>
+                          <CheckCircle2 size={12} /> Acknowledge
+                        </button>
+                        <button type="button" className="g-btn-ghost g-btn-sm" onClick={() => openTicket(a)}>
+                          <Wrench size={12} /> Open ticket
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {visibleAnomalies.length === 0 && <p className="g-kpi-sub">No anomalies in this severity band.</p>}
           </div>
         </Card>
       </div>
 
       <div className="g-grid" style={{ gridTemplateColumns: "1fr", marginTop: 18 }}>
-        <Card title="Maintenance queue" icon={Wrench}>
-          <div className="g-list">
-            {maintenanceQueue.map((m, i) => (
-              <div className="g-list-row" key={i}>
-                <div className="g-list-main">
-                  {m.due === "Overdue"
-                    ? <Clock size={14} style={{ color: C.red }} />
-                    : <CheckCircle2 size={14} style={{ color: C.textDimmer }} />}
-                  <span><span className="g-mono">{m.charger}</span> — {m.task}</span>
+        <Card title="Maintenance queue" icon={Wrench} action={
+          <span className="g-kpi-sub" style={{ margin: 0 }}>
+            {maintenanceQueue.length} scheduled · {overdue} overdue
+          </span>
+        }>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {maintenanceQueue.map((m, i) => {
+              const isDone = scheduledMaint.includes(m.charger);
+              const isOpen = expandedMaint === i;
+              const isOverdue = m.due === "Overdue";
+              const priorityColor = m.priority === "high" ? C.red : m.priority === "medium" ? C.amber : C.textDim;
+              return (
+                <div key={m.charger} style={{
+                  border: `1px solid ${isOverdue ? `${C.red}44` : C.borderSoft}`,
+                  background: isOverdue ? `${C.red}0a` : "transparent",
+                  borderRadius: 10,
+                  opacity: isDone ? 0.55 : 1,
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedMaint(isOpen ? null : i)}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", gap: 8,
+                      padding: "9px 10px", background: "transparent", border: "none",
+                      cursor: "pointer", textAlign: "left", color: C.text, font: "inherit", borderRadius: 10,
+                    }}
+                  >
+                    {isDone
+                      ? <CheckCircle2 size={14} style={{ color: C.green, flexShrink: 0 }} />
+                      : isOverdue
+                        ? <Clock size={14} style={{ color: C.red, flexShrink: 0 }} />
+                        : <CheckCircle2 size={14} style={{ color: C.textDimmer, flexShrink: 0 }} />}
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span className="g-mono">{m.charger}</span> — <span>{m.task}</span>
+                      {isDone && <span style={{ marginLeft: 6, display: "inline-block" }}><Badge status="healthy">scheduled</Badge></span>}
+                    </span>
+                    <span className="g-list-sub" style={{ color: isOverdue ? C.red : C.textDimmer }}>{m.due}</span>
+                    <ChevronDown size={14} style={{ color: C.textDimmer, flexShrink: 0, transform: isOpen ? "rotate(180deg)" : "none" }} />
+                  </button>
+                  {isOpen && (
+                    <div style={{ padding: "2px 10px 12px 32px" }}>
+                      <div className="g-smart-charge-grid" style={{ gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+                        {detailChip("Priority", m.priority || "—")}
+                        {detailChip("Site", m.site || "—")}
+                        {detailChip("Part", m.part || "—")}
+                        {detailChip("Down time", m.estDowntime || "—")}
+                      </div>
+                      <p className="g-kpi-sub" style={{ margin: "10px 0", color: C.textDim }}>
+                        <strong style={{ color: C.text }}>{m.task}:</strong> {m.description || "—"}
+                        <span style={{ display: "block", marginTop: 2 }}>Last serviced {m.lastService || "never"}.</span>
+                      </p>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {!isDone && (
+                          <button type="button" className="g-btn-ghost g-btn-sm" style={{ color: C.cyan, borderColor: `${C.cyan}55` }} onClick={() => scheduleService(m)}>
+                            <Calendar size={12} /> Schedule now
+                          </button>
+                        )}
+                        <button type="button" className="g-btn-ghost g-btn-sm" onClick={() => orderPart(m)}>
+                          <Wrench size={12} /> Order part
+                        </button>
+                        <button type="button" className="g-btn-ghost g-btn-sm" onClick={() => assignCrew(m)}>
+                          <User size={12} /> Assign crew
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <span className="g-list-sub" style={{ color: m.due === "Overdue" ? C.red : C.textDimmer }}>{m.due}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -5968,6 +7310,41 @@ function OwnerTheftPage({ preferences }) {
     return { gridKw, stationLoad, siteOtherLoad, spread, mismatch, highTemp, liveConnected, sessions };
   }, [live, liveConnected]);
 
+  const [flagFilter, setFlagFilter] = useState("all");
+  const [expandedFlag, setExpandedFlag] = useState(null);
+  const [resolvedFlags, setResolvedFlags] = useState([]);
+  const [runningCheck, setRunningCheck] = useState(false);
+  const [actionMessage, setActionMessage] = useState("");
+
+  const filteredFlags = theftFlags.filter((t) => flagFilter === "all" || t.confidence === flagFilter);
+  const flagChips = [
+    { key: "all", label: `All ${theftFlags.length}` },
+    { key: "high", label: "High" },
+    { key: "medium", label: "Medium" },
+    { key: "low", label: "Low" },
+  ];
+  const flagKey = (t) => `${t.charger}|${t.detected}`;
+  const isResolved = (t) => resolvedFlags.includes(flagKey(t));
+  const unresolved = theftFlags.filter((t) => !isResolved(t)).length;
+
+  const resolveFlag = (t) => {
+    setResolvedFlags((cur) => (cur.includes(flagKey(t)) ? cur : [...cur, flagKey(t)]));
+    setExpandedFlag(null);
+    setActionMessage(`${t.charger} (${t.type}) marked resolved — recovery tracked for reconciliation.`);
+  };
+  const auditFlag = (t) => setActionMessage(`Audit log opened for ${t.charger} at ${t.site}.`);
+  const ticketFlag = (t) => setActionMessage(`Service ticket created for ${t.charger} — ${t.type} escalated to field ops.`);
+  const runCheck = () => {
+    if (runningCheck) return;
+    setRunningCheck(true);
+    setActionMessage("");
+    setTimeout(() => {
+      const spread = liveLeak.liveConnected && liveLeak.spread != null ? `${liveLeak.spread.toFixed(1)} kW` : "—";
+      setActionMessage(`Detection check complete — live unexplained draw is ${spread} against ${liveLeak.stationLoad.toFixed(0)} kW metered. No new flags.`);
+      setRunningCheck(false);
+    }, 1400);
+  };
+
   return (
     <div className="g-page">
       <div className="g-page-head">
@@ -5975,15 +7352,22 @@ function OwnerTheftPage({ preferences }) {
         <p>Meter draw compared against expected session and grid profiles.</p>
       </div>
 
+      {actionMessage && <ActionFeedback message={actionMessage} onDismiss={() => setActionMessage("")} />}
+
       <div className="g-grid g-grid-4">
-        <Kpi label="Suspected incidents" value={theftFlags.length} sub="Last 30 days" icon={ShieldOff} accent={C.red} />
+        <Kpi label="Suspected incidents" value={unresolved} sub={`${resolvedFlags.length} resolved this session`} icon={ShieldOff} accent={C.red} />
         <Kpi label="Est. energy lost" value={`${totalLost} kWh`} sub="Unbilled or diverted" icon={Zap} accent={C.amber} />
         <Kpi label="Est. revenue impact" value={formatCurrency(revenueImpact, preferences.currency, preferences.region)} sub="At blended tariff" icon={DollarSign} accent={C.red} />
-        <Kpi label={liveLeak.liveConnected ? "Live unexplained load" : "Chargers flagged"} value={liveLeak.liveConnected ? (liveLeak.spread != null ? `${liveLeak.spread.toFixed(0)} kW` : "—") : `${theftFlags.length} / 48`} sub={liveLeak.liveConnected ? "Grid − metered sessions" : "Currently under watch"} icon={Eye} accent={liveLeak.liveConnected && (liveLeak.spread || 0) > 2 ? C.red : C.textDim} />
+        <Kpi label={liveLeak.liveConnected ? "Live unexplained load" : "Chargers flagged"} value={liveLeak.liveConnected ? (liveLeak.spread != null ? `${liveLeak.spread.toFixed(0)} kW` : "—") : `${unresolved} / ${theftFlags.length}`} sub={liveLeak.liveConnected ? "Grid − metered sessions" : "Currently under watch"} icon={Eye} accent={liveLeak.liveConnected && (liveLeak.spread || 0) > 2 ? C.red : C.textDim} />
       </div>
 
       {liveLeak.liveConnected && (
-        <Card title="Live port-vs-grid divergence (MODBUS ↔ OCPP)" icon={ShieldOff} style={{ marginTop: 16 }}>
+        <Card title="Live port-vs-grid divergence (MODBUS ↔ OCPP)" icon={ShieldOff} style={{ marginTop: 16 }} action={
+          <button type="button" className="g-btn-ghost g-btn-sm" onClick={runCheck} disabled={runningCheck} title="Re-run the live theft scan">
+            <RefreshCw size={12} style={{ animation: runningCheck ? "spin 0.8s linear infinite" : "none" }} />
+            {runningCheck ? "Scanning…" : "Run detection check"}
+          </button>
+        }>
           <div className="g-smart-charge-grid" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
             <div className="g-smart-chip"><span className="g-smart-chip-l">Site master meter</span><span className="g-cost-value g-mono">{liveLeak.gridKw != null ? `${liveLeak.gridKw.toFixed(0)} kW` : "—"}</span></div>
             <div className="g-smart-chip"><span className="g-smart-chip-l">Sessions metered</span><span className="g-cost-value g-mono">{liveLeak.stationLoad.toFixed(0)} kW</span></div>
@@ -6001,8 +7385,9 @@ function OwnerTheftPage({ preferences }) {
       )}
 
       <div className="g-grid g-grid-3" style={{ marginTop: 18 }}>
-        <Card title="Incidents per week" icon={TrendingUp} style={{ gridColumn: "span 2" }}>
-          <ResponsiveContainer width="100%" height={170}>
+        <Card title="Incidents per week" icon={TrendingUp} style={{ gridColumn: "span 2", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minHeight: 170, position: "relative" }}>
+          <ResponsiveContainer width="100%" height="100%">
             <BarChart data={theftTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.borderSoft} vertical={false} />
               <XAxis dataKey="week" tick={{ fill: C.textDimmer, fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -6011,9 +7396,11 @@ function OwnerTheftPage({ preferences }) {
               <Bar dataKey="incidents" fill={C.red} radius={[4, 4, 0, 0]} name="Incidents" />
             </BarChart>
           </ResponsiveContainer>
+          </div>
         </Card>
-        <Card title="By detection type" icon={ShieldOff}>
-          <ResponsiveContainer width="100%" height={170}>
+        <Card title="By detection type" icon={ShieldOff} style={{ display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minHeight: 170, position: "relative" }}>
+          <ResponsiveContainer width="100%" height="100%">
             <BarChart data={theftByType} layout="vertical" margin={{ left: 10 }}>
               <XAxis type="number" hide />
               <YAxis dataKey="type" type="category" tick={{ fill: C.textDimmer, fontSize: 10 }} axisLine={false} tickLine={false} width={92} />
@@ -6021,29 +7408,83 @@ function OwnerTheftPage({ preferences }) {
               <Bar dataKey="count" fill={C.amber} radius={[0, 4, 4, 0]} name="Flags" />
             </BarChart>
           </ResponsiveContainer>
+          </div>
         </Card>
       </div>
 
       <div className="g-grid" style={{ gridTemplateColumns: "1fr", marginTop: 18 }}>
-        <Card title="Flagged sessions" icon={Eye}>
-          <div className="g-table">
-            <div className="g-table-row g-table-head">
-              <span>Charger</span><span>Site</span><span>Expected vs. actual</span><span>Deviation</span><span>Confidence</span>
-            </div>
-            {theftFlags.map((t, i) => (
-              <div className="g-table-row" key={i}>
-                <span className="g-mono">{t.charger}</span>
-                <span>{t.site}</span>
-                <span>{t.expected} → {t.actual}</span>
-                <span style={{ color: t.deviation.startsWith("-") || t.deviation.startsWith("+") ? C.amber : C.text }}>{t.deviation}</span>
-                <span>
-                  <span className="g-badge" style={{
-                    color: CONFIDENCE_COLOR[t.confidence], borderColor: `${CONFIDENCE_COLOR[t.confidence]}55`,
-                    background: `${CONFIDENCE_COLOR[t.confidence]}18`,
-                  }}>{t.confidence}</span>
-                </span>
-              </div>
+        <Card title="Flagged sessions" icon={Eye} action={
+          <span className="g-horizon-chips" style={{ gap: 4 }}>
+            {flagChips.map((chip) => (
+              <button
+                type="button"
+                key={chip.key}
+                className={`g-chip ${flagFilter === chip.key ? "g-chip-active" : ""}`}
+                onClick={() => setFlagFilter(chip.key)}
+              >
+                {chip.label}
+              </button>
             ))}
+          </span>
+        }>
+          <div className="g-table">
+            <div className="g-table-row g-table-row-6 g-table-head">
+              <span>Charger</span><span>Site</span><span>Detection</span><span>Detected</span><span>Deviation</span><span>Confidence</span>
+            </div>
+            {filteredFlags.map((t, i) => {
+              const isOpen = expandedFlag === i;
+              const done = isResolved(t);
+              return (
+                <div key={flagKey(t)} style={{ borderBottom: "1px solid " + C.borderSoft, opacity: done ? 0.55 : 1 }}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedFlag(isOpen ? null : i)}
+                    className="g-table-row g-table-row-6"
+                    style={{ width: "100%", cursor: "pointer", background: "transparent", border: "none", font: "inherit", textAlign: "left", color: "inherit", borderRadius: 8 }}
+                  >
+                    <span className="g-mono">{t.charger}</span>
+                    <span>{t.site}</span>
+                    <span>{t.type}</span>
+                    <span>{t.detected}</span>
+                    <span style={{ color: t.deviation.startsWith("-") || t.deviation.startsWith("+") ? C.amber : C.text }}>{t.deviation}</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span className="g-badge" style={{
+                        color: CONFIDENCE_COLOR[t.confidence], borderColor: `${CONFIDENCE_COLOR[t.confidence]}55`,
+                        background: `${CONFIDENCE_COLOR[t.confidence]}18`,
+                      }}>{t.confidence}</span>
+                      <ChevronDown size={13} style={{ color: C.textDimmer, transform: isOpen ? "rotate(180deg)" : "none" }} />
+                    </span>
+                  </button>
+                  {isOpen && (
+                    <div style={{ padding: "4px 10px 14px 0" }}>
+                      <div className="g-smart-charge-grid" style={{ gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+                        <div className="g-smart-chip"><span className="g-smart-chip-l">Expected vs actual</span><span className="g-cost-value g-mono">{t.expected} → {t.actual}</span></div>
+                        <div className="g-smart-chip"><span className="g-smart-chip-l">Stage</span><span className="g-cost-value g-mono">{done ? "Resolved" : t.stage || "Open"}</span></div>
+                        <div className="g-smart-chip"><span className="g-smart-chip-l">Impact</span><span className="g-cost-value g-mono">{t.impact}</span></div>
+                        <div className="g-smart-chip"><span className="g-smart-chip-l">Detected</span><span className="g-cost-value g-mono">{t.detected}</span></div>
+                      </div>
+                      <p className="g-kpi-sub" style={{ margin: "10px 0", color: C.textDim }}>
+                        <strong style={{ color: C.text }}>Recovery plan:</strong> {t.recovery}
+                      </p>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {!done && (
+                          <button type="button" className="g-btn-ghost g-btn-sm" style={{ color: C.green, borderColor: `${C.green}55` }} onClick={() => resolveFlag(t)}>
+                            <CheckCircle2 size={12} /> Mark resolved
+                          </button>
+                        )}
+                        <button type="button" className="g-btn-ghost g-btn-sm" onClick={() => auditFlag(t)}>
+                          <Eye size={12} /> Audit meter
+                        </button>
+                        <button type="button" className="g-btn-ghost g-btn-sm" onClick={() => ticketFlag(t)}>
+                          <Wrench size={12} /> Create ticket
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {filteredFlags.length === 0 && <p className="g-kpi-sub" style={{ padding: "10px 0" }}>No flags in this confidence band.</p>}
           </div>
         </Card>
       </div>
@@ -6214,13 +7655,7 @@ function OwnerPredictiveInsightsPage({ onNavigate }) {
         <h2>Predictive insights</h2>
         <p>AI-powered forecasts and practical actions for your charging network.</p>
       </div>
-      {actionMessage && (
-        <div className="g-insight g-action-feedback" role="status">
-          <CheckCircle2 size={14} style={{ color: C.green, flexShrink: 0, marginTop: 2 }} />
-          <span>{actionMessage}</span>
-          <button type="button" className="g-feedback-dismiss" onClick={() => setActionMessage("")}><X size={14} /></button>
-        </div>
-      )}
+      {actionMessage && <ActionFeedback message={actionMessage} onDismiss={() => setActionMessage("")} />}
       <div className="g-grid g-grid-4">
         <Kpi label="Forecast accuracy" value="92%" sub="Based on 90 days of network data" icon={Target} accent={C.green} />
         <Kpi label="Sites monitored" value={liveConnected ? liveStats.stations.length : "6"} sub={liveConnected ? `${liveStats.charging.length} charging live · OCPP` : "Live charger and grid signals"} icon={Activity} />
@@ -6821,7 +8256,7 @@ function OwnerSettingsPage({
   ocppStatus, testOcppConnection, respondingCount,
   anprEndpoint, setAnprEndpoint, anprSensitivity, setAnprSensitivity,
   anprStatus, testAnprConnection, camerasOnline,
-  preferences, setPreferences,
+  preferences, setPreferences, minimalMode, onToggleMinimal,
 }) {
   const { fleetChargers } = useOwnerData();
   const { live } = useLiveData();
@@ -6886,6 +8321,34 @@ function OwnerSettingsPage({
             </select>
           </div>
           <button type="button" className="g-btn-primary" style={{ maxWidth: 160 }}>Save changes</button>
+        </Card>
+
+        <Card title="Looks & feel" icon={Sparkles}>
+          <div className="g-field-block" style={{ marginBottom: 16 }}>
+            <span className="g-field-label">Theme</span>
+            <div className="g-seg">
+              <button
+                type="button"
+                className={`g-seg-btn ${!minimalMode ? "active" : ""}`}
+                onClick={() => minimalMode && onToggleMinimal && onToggleMinimal()}
+              ><Moon size={13} /> Dark</button>
+              <button
+                type="button"
+                className={`g-seg-btn ${minimalMode ? "active" : ""}`}
+                onClick={() => !minimalMode && onToggleMinimal && onToggleMinimal()}
+              ><Sun size={13} /> Light</button>
+            </div>
+          </div>
+          <div className="g-field-block" style={{ marginBottom: 6 }}>
+            <span className="g-field-label">Liquid glass · {preferences.glass ?? 70}%</span>
+            <input
+              type="range" min="0" max="100" step="5"
+              className="g-glass-slider"
+              value={preferences.glass ?? 70}
+              onChange={(e) => setPreferences((prev) => ({ ...prev, glass: Number(e.target.value) }))}
+            />
+          </div>
+          <p className="g-kpi-sub">Frosted-blur strength for cards, the sidebar and dialogs. Raise it for a softer liquid-glass look, lower it for clearer panels.</p>
         </Card>
 
         <Card title="OCPP connection" icon={Plug} style={{ gridColumn: "1 / -1" }}>
@@ -7050,28 +8513,51 @@ function OwnerSettingsPage({
   );
 }
 
-function OwnerDashboard({ name, preferences, setPreferences }) {
-  const { loading, error } = useAppData();
+function OwnerDashboard({ name, preferences, setPreferences, minimalMode, onToggleMinimal }) {
+  const { loading, error, refreshLive } = useAppData();
   const { fleetChargers, theftFlags, anomalies } = useOwnerData();
   const { live, liveConnected } = useLiveData();
   const [page, setPage] = useState("overview");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const searchInputRef = useRef(null);
+  const [recentSearches, setRecentSearches] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("gp_recent_searches") || "[]"); } catch { return []; }
+  });
   const [ocppEndpoint, setOcppEndpoint] = useState(`${wsBaseUrl()}/ocpp/{stationId}`);
   const [ocppProtocol, setOcppProtocol] = useState("OCPP 1.6J");
-  const [ocppStatus, setOcppStatus] = useState("idle"); // idle | testing | connected | failed
-  const [respondingCount, setRespondingCount] = useState(0);
+  const [ocppManualStatus, setOcppManualStatus] = useState(null); // null | "testing" | "connected" | "failed"
+  const [ocppManualCount, setOcppManualCount] = useState(null);
 
   const [anprEndpoint, setAnprEndpoint] = useState(`${API_BASE_URL}/api/v1/plate-events`);
   const [anprSensitivity, setAnprSensitivity] = useState("Standard");
-  const [anprStatus, setAnprStatus] = useState("idle"); // idle | testing | connected | failed
-  const [camerasOnline, setCamerasOnline] = useState(0);
+  const [anprManualStatus, setAnprManualStatus] = useState(null); // null | "testing" | "connected" | "failed"
+  const [anprManualCount, setAnprManualCount] = useState(null);
+
+  // Derive status from live data; a manual test result overrides only while in-progress.
+  // Once live data is available it always wins (handles page refresh correctly).
+  const livOcppStatus = live?.sources?.ocpp?.status === "connected" ? "connected" : null;
+  const livOcppCount  = live?.stations?.length ?? 0;
+  const livAnprStatus = live?.sources?.anpr?.status === "connected" ? "connected" : null;
+  const livAnprCount  = live?.anpr?.cameras?.length ?? 0;
+
+  const ocppStatus     = ocppManualStatus === "testing" ? "testing"
+                       : ocppManualStatus === "failed"  ? "failed"
+                       : livOcppStatus    ?? ocppManualStatus ?? "idle";
+  const respondingCount = ocppManualCount !== null ? ocppManualCount : livOcppCount;
+  const anprStatus     = anprManualStatus === "testing" ? "testing"
+                       : anprManualStatus === "failed"  ? "failed"
+                       : livAnprStatus    ?? anprManualStatus ?? "idle";
+  const camerasOnline  = anprManualCount !== null ? anprManualCount : livAnprCount;
 
   function testOcppConnection() {
     if (!ocppEndpoint.trim()) {
-      setOcppStatus("failed");
+      setOcppManualStatus("failed");
       return;
     }
-    setOcppStatus("testing");
+    setOcppManualStatus("testing");
     const stationId = "GD-TEST-01";
     const url = ocppEndpoint.replace("{stationId}", stationId);
     const subprotocol = ocppProtocol.startsWith("2") ? "ocpp2.0.1" : "ocpp1.6";
@@ -7079,11 +8565,11 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
     try {
       ws = new WebSocket(url, [subprotocol]);
     } catch {
-      setOcppStatus("failed");
+      setOcppManualStatus("failed");
       return;
     }
     const timeout = setTimeout(() => {
-      setOcppStatus("failed");
+      setOcppManualStatus("failed");
       try { ws.close(); } catch { /* ignore */ }
     }, 6000);
     ws.onopen = () => {
@@ -7100,26 +8586,27 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
       if (Array.isArray(msg) && msg[0] === 3 && msg[1] === "gp-boot-1") {
         clearTimeout(timeout);
         const ok = !!msg[2] && msg[2].status === "Accepted";
-        setOcppStatus(ok ? "connected" : "failed");
+        setOcppManualStatus(ok ? "connected" : "failed");
         if (ok) {
-          setRespondingCount(live?.stations?.length || fleetChargers.length);
+          setOcppManualCount(null); // fall back to the live station count
+          refreshLive();
         }
         try { ws.close(); } catch { /* ignore */ }
       }
     };
     ws.onerror = () => {
       clearTimeout(timeout);
-      setOcppStatus("failed");
+      setOcppManualStatus("failed");
       try { ws.close(); } catch { /* ignore */ }
     };
   }
 
   function testAnprConnection() {
     if (!anprEndpoint.trim()) {
-      setAnprStatus("failed");
+      setAnprManualStatus("failed");
       return;
     }
-    setAnprStatus("testing");
+    setAnprManualStatus("testing");
     const url = anprEndpoint.startsWith("http")
       ? anprEndpoint
       : `${API_BASE_URL}${anprEndpoint}`;
@@ -7138,12 +8625,12 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
         return res.json();
       })
       .then(() => {
-        setAnprStatus("connected");
-        setCamerasOnline(live?.anpr?.cameras?.length || 1);
+        setAnprManualStatus("connected");
+        setAnprManualCount(live?.anpr?.cameras?.length || 1);
       })
       .catch(() => {
-        setAnprStatus("failed");
-        setCamerasOnline(0);
+        setAnprManualStatus("failed");
+        setAnprManualCount(0);
       });
   }
 
@@ -7161,54 +8648,187 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
     { key: "settings", label: "Settings", icon: Settings },
   ];
 
+  useEffect(() => {
+    const onNav = (e) => { if (e.detail?.page) setPage(e.detail.page); };
+    window.addEventListener("gp-navigate", onNav);
+    return () => window.removeEventListener("gp-navigate", onNav);
+  }, []);
+
+  useEffect(() => {
+    const onRefresh = () => setRefreshTick((v) => v + 1);
+    window.addEventListener("gp-refresh", onRefresh);
+    return () => window.removeEventListener("gp-refresh", onRefresh);
+  }, []);
+
+  // Spotlight search — broad index, relevance ranked, keyboard navigable.
   const searchResults = useMemo(() => {
-    if (!searchQuery || searchQuery.length < 2) return [];
-    const query = searchQuery.toLowerCase();
-    const results = [];
+    const q = (searchQuery || "").trim();
+    if (!q) return [];
+    const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return [];
 
-    navItems.forEach((item) => {
-      if (item.label.toLowerCase().includes(query)) {
-        results.push({
-          type: "dashboard",
-          key: item.key,
-          title: item.label,
-          description: `Navigate to ${item.label}`,
-        });
-      }
+    const entries = [];
+    const push = (e) => { e.queryHighlight = q; entries.push(e); };
+    const pushIntent = (e) => { e.__intent = 1; e.queryHighlight = q; entries.push(e); };
+
+    navItems.forEach((item) => push({
+      type: "dashboard",
+      key: item.key,
+      title: item.label,
+      sub: `Open ${item.label}`,
+      keyword: item.label,
+      group: "Pages",
+      action: () => setPage(item.key),
+    }));
+
+    fleetChargers.forEach((charger) => push({
+      type: "charger",
+      title: `${charger.id} · ${charger.location}`,
+      sub: `${charger.power} · ${charger.status}`,
+      keyword: `${charger.id} ${charger.location} ${charger.status} ${charger.power} station`,
+      badge: charger.status === "healthy" ? "available" : charger.status === "warning" ? "warning" : "down",
+      badgeColor: charger.status === "healthy" ? C.green : charger.status === "warning" ? C.amber : C.red,
+      group: "Stations",
+      action: () => setPage("charging"),
+    }));
+
+    // Live gateway sources
+    Object.entries(live?.sources || {}).forEach(([key, s]) => {
+      const label = s?.name || key;
+      const status = s?.status || "standby";
+      push({
+        type: "data",
+        title: label,
+        sub: status === "connected" ? "Live protocol feed" : `${status} · protocol feed`,
+        keyword: `${key} ${label} protocol gateway feed live ocpp modbus openadr anpr volttron`,
+        badge: status === "connected" ? "live" : status,
+        badgeColor: status === "connected" ? C.green : status === "standby" ? C.textDim : status === "connecting" ? C.amber : C.red,
+        group: "Live feeds",
+        action: () => setPage("gateway"),
+      });
     });
 
-    fleetChargers.forEach((charger) => {
-      const searchable = `${charger.id} ${charger.location} ${charger.status} ${charger.power}`.toLowerCase();
-      if (searchable.includes(query)) {
-        results.push({
-          type: "charger",
-          title: `${charger.id} · ${charger.location}`,
-          description: `${charger.status} · ${charger.power}`,
-          status: charger.status === "healthy" ? "available" : charger.status === "warning" ? "busy" : "maintenance",
-          action: () => setPage("charging"),
-        });
-      }
-    });
+    anomalies.forEach((alert) => push({
+      type: "data",
+      title: alert.title || "Network alert",
+      sub: alert.message || "",
+      keyword: `${alert.title || "alert"} ${alert.message || ""} ${alert.severity || ""}`,
+      badge: alert.severity,
+      badgeColor: alert.severity === "critical" || alert.severity === "high" ? C.red : alert.severity === "medium" ? C.amber : C.cyan,
+      group: "Alerts",
+      action: () => setPage("alerts"),
+    }));
 
-    anomalies.forEach((alert) => {
-      const searchable = `${alert.title || "Alert"} ${alert.message || ""} ${alert.severity || ""}`.toLowerCase();
-      if (searchable.includes(query)) {
-        results.push({
-          type: "data",
-          title: alert.title || "Network alert",
-          description: alert.message || `${alert.severity || "Active"} alert`,
-          action: () => setPage("alerts"),
-        });
-      }
-    });
+    const tips = [
+      { title: "OCPP health check", sub: "Test a station handshake", kw: "ocpp health test ws station handshake", icon: <Wifi size={14} />, go: () => setPage("charging") },
+      { title: "Predictive insights", sub: "Fleet trends & recommendations", kw: "insights predictions trends ai", icon: <Lightbulb size={14} />, go: () => setPage("insights") },
+      { title: "Energy theft monitor", sub: "Anomaly & tap-off detection", kw: "theft anomalies tap off tamper", icon: <ShieldOff size={14} />, go: () => setPage("theft") },
+      { title: "Alerts console", sub: "Active network anomalies", kw: "alerts notifications anomalies", icon: <Bell size={14} />, go: () => setPage("alerts") },
+      { title: "Products & roadmap", sub: "What's shipping next", kw: "products roadmap features upcoming", icon: <Rocket size={14} />, go: () => setPage("products") },
+      { title: "Settings", sub: "Gateways, themes & preferences", kw: "settings gateway ocpp anpr theme", icon: <Settings size={14} />, go: () => setPage("settings") },
+    ];
+    tips.forEach((t) => push({ type: "action", title: t.title, sub: t.sub, keyword: t.kw, icon: t.icon, group: "Quick actions", action: t.go }));
 
-    return results;
-  }, [searchQuery, fleetChargers, anomalies]);
+    // Natural-language intents — "nearest ev station", "any alerts?", "ocpp down?"…
+    const intents = matchSearchIntents(q);
+    const askPulse = (prompt) => { try { window.dispatchEvent(new CustomEvent("gp-chat-prompt", { detail: { prompt } })); } catch { /* noop */ } };
+    if (intents.includes("chargers")) {
+      fleetChargers.slice(0, 5).forEach((charger) => pushIntent({
+        type: "charger",
+        title: `${charger.id} · ${charger.location}`,
+        sub: `${charger.power} · ${charger.status}`,
+        keyword: `${charger.id} ${charger.location} nearest nearby station charger fleet status`,
+        badge: charger.status === "healthy" ? "healthy" : charger.status,
+        badgeColor: charger.status === "healthy" ? C.green : charger.status === "warning" ? C.amber : C.red,
+        group: "Stations",
+        action: () => setPage("charging"),
+      }));
+    }
+    if (intents.includes("ocpp") || intents.includes("gateway")) {
+      pushIntent({ type: "action", title: "Open the Live gateway", sub: "OCPP, MODBUS, OpenADR, ANPR & VOLTTRON feeds", keyword: "ocpp gateway protocol websocket open live", icon: <Radio size={14} />, group: "Quick actions", action: () => setPage("gateway") });
+    }
+    if (intents.includes("alerts")) {
+      anomalies.slice(0, 3).forEach((alert) => pushIntent({
+        type: "data", title: alert.title || "Network alert", sub: alert.message || "",
+        keyword: `${alert.title || "alert"} ${alert.message || ""} ${alert.severity || ""} active fault`,
+        badge: alert.severity, badgeColor: alert.severity === "critical" || alert.severity === "high" ? C.red : alert.severity === "medium" ? C.amber : C.cyan,
+        group: "Alerts", action: () => setPage("alerts"),
+      }));
+    }
+    if (intents.includes("theft")) pushIntent({ type: "action", title: "Energy theft monitor", sub: "Anomaly & tap-off detection", keyword: "theft tamper tap fraud anpr plate", icon: <ShieldOff size={14} />, group: "Quick actions", action: () => setPage("theft") });
+    if (intents.includes("grid")) pushIntent({ type: "action", title: "Grid & energy", sub: "Live load, solar & demand", keyword: "grid energy load solar demand power", icon: <Gauge size={14} />, group: "Quick actions", action: () => setPage("grid") });
+    if (intents.includes("battery")) pushIntent({ type: "action", title: "Battery insights", sub: "Capacity & cycle data across the fleet", keyword: "battery health capacity cycles fleet", icon: <Battery size={14} />, group: "Quick actions", action: () => setPage("battery") });
+    if (intents.includes("insights")) pushIntent({ type: "action", title: "Predictive insights", sub: "Fleet trends & recommendations", keyword: "insights predict forecast trends", icon: <Lightbulb size={14} />, group: "Quick actions", action: () => setPage("insights") });
+    if (intents.includes("planner")) pushIntent({ type: "action", title: "Charging operations", sub: "Sessions, connectors & schedules", keyword: "sessions operations schedule planner charging", icon: <Activity size={14} />, group: "Quick actions", action: () => setPage("charging") });
+    if (intents.includes("roadmap")) pushIntent({ type: "action", title: "Products & roadmap", sub: "What's shipping next", keyword: "products roadmap upcoming features", icon: <Rocket size={14} />, group: "Quick actions", action: () => setPage("products") });
+    if (intents.includes("settings")) pushIntent({ type: "action", title: "Settings", sub: "Gateways, themes & preferences", keyword: "settings gateway ocpp anpr theme currency", icon: <Settings size={14} />, group: "Quick actions", action: () => setPage("settings") });
+    if (intents.includes("accounts")) pushIntent({ type: "action", title: "Demo accounts", sub: "Owner GRIDPULSE · Driver TN84DR5021", keyword: "demo account login password sign in", icon: <Users size={14} />, group: "Quick actions", action: () => askPulse("Demo accounts") });
+
+    const ranked = entries
+      .map((e) => { const base = spotlightScore(e, tokens); return { e, s: base === 0 && e.__intent ? 3 : base }; })
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s);
+
+    if (!ranked.length && q.length >= 3) {
+      ranked.push({ s: 3, e: { type: "action", title: `Ask Pulse: “${q}”`, sub: "Let the assistant answer this for you", keyword: q, icon: <Sparkles size={14} />, queryHighlight: "", group: "Quick actions", action: () => askPulse(q) } });
+    }
+
+    return ranked.map((x) => x.e);
+  }, [searchQuery, navItems, fleetChargers, anomalies, live, liveConnected]);
+
+  const searchSections = useMemo(() => {
+    const secs = [];
+    const hasQuery = searchQuery.trim().length >= 1;
+    if (!hasQuery && searchFocused && recentSearches.length) {
+      secs.push({
+        label: "Recent",
+        items: recentSearches.slice(0, 5).map((r) => ({
+          type: "action",
+          title: `“${r.text}”`,
+          sub: "Search again",
+          icon: <Clock size={14} />,
+          queryHighlight: "",
+          action: () => setSearchQuery(r.text),
+        })),
+      });
+    }
+    if (hasQuery) {
+      ["Pages", "Stations", "Live feeds", "Alerts", "Quick actions"].forEach((label) => {
+        const items = searchResults.filter((r) => r.group === label);
+        if (items.length) secs.push({ label, items });
+      });
+    }
+    return secs;
+  }, [searchQuery, searchResults, searchFocused, recentSearches]);
+
+  useEffect(() => { setActiveIdx(0); }, [searchQuery, searchResults, recentSearches, searchFocused]);
+
+  const handleSearchKeyDown = (e) => {
+    const flat = searchSections.flatMap((s) => s.items);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => (flat.length ? (i + 1) % flat.length : 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => (flat.length ? (i - 1 + flat.length) % flat.length : 0));
+    } else if (e.key === "Enter") {
+      if (flat[activeIdx]) { e.preventDefault(); handleSearchResultSelect(flat[activeIdx]); }
+    } else if (e.key === "Escape") {
+      setSearchQuery(""); setSearchFocused(false); e.currentTarget.blur();
+    }
+  };
 
   const handleSearchResultSelect = (result) => {
+    const query = searchQuery.trim();
+    if (query) {
+      const next = [{ text: query, time: Date.now() }, ...recentSearches.filter((r) => r.text !== query)].slice(0, 6);
+      setRecentSearches(next);
+      try { localStorage.setItem("gp_recent_searches", JSON.stringify(next)); } catch { /* noop */ }
+    }
     if (result.action) result.action();
     else if (result.key) setPage(result.key);
     setSearchQuery("");
+    setSearchFocused(false);
   };
 
   if (loading) return <DashboardLoadState />;
@@ -7216,32 +8836,38 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
 
   return (
     <div className="g-shell">
-      <Sidebar items={navItems} active={page} onSelect={setPage} />
+<Sidebar items={navItems} active={page} onSelect={setPage} />
       <main className="g-main">
+        <PullToRefresh onRefresh={() => { setRefreshTick((v) => v + 1); refreshLive(); }}>
         <div className="g-search-wrapper">
           <div className="g-search-bar">
             <Search size={16} style={{ color: C.textDimmer }} />
             <input
+              ref={searchInputRef}
               type="text"
-              placeholder="Search chargers, sites, alerts, or data..."
+              placeholder="Spotlight — search anything…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              onKeyDown={handleSearchKeyDown}
             />
             {searchQuery && (
-              <button type="button" className="g-search-clear" onClick={() => setSearchQuery("")}>
+              <button type="button" className="g-search-clear" onClick={() => { setSearchQuery(""); setActiveIdx(0); }}>
                 <X size={14} />
               </button>
             )}
           </div>
-          {searchQuery && searchResults.length > 0 && (
+          {searchSections.some((s) => s.items.length) && (
             <SearchResults
-              query={searchQuery}
-              results={searchResults}
-              onClose={() => setSearchQuery("")}
-              onSelectResult={handleSearchResultSelect}
+              sections={searchSections}
+              activeIdx={activeIdx}
+              onHoverItem={setActiveIdx}
+              onSelectItem={handleSearchResultSelect}
             />
           )}
         </div>
+        <div key={`${page}:${refreshTick}`} className="g-page-enter">
         {page === "overview" && <OwnerOverviewPage preferences={preferences} />}
         {page === "gateway" && <OwnerGatewayPage />}
         {page === "charging" && (
@@ -7272,8 +8898,12 @@ function OwnerDashboard({ name, preferences, setPreferences }) {
             camerasOnline={camerasOnline}
             preferences={preferences}
             setPreferences={setPreferences}
+            minimalMode={minimalMode}
+            onToggleMinimal={onToggleMinimal}
           />
         )}
+        </div>
+        </PullToRefresh>
       </main>
     </div>
   );
@@ -7311,17 +8941,30 @@ export default function GridPulseApp() {
     { id: 3, type: 'warning', message: 'Grid demand approaching peak threshold', time: '1 hour ago', read: true },
     { id: 4, type: 'info', message: 'New charging profile available for fleet', time: '3 hours ago', read: true },
   ]);
-  const [preferences, setPreferences] = useState({ currency: 'INR', region: 'India' });
+  const [preferences, setPreferences] = useState(() => {
+    const defaults = { currency: 'INR', region: 'India', glass: 70 };
+    try {
+      const raw = localStorage.getItem("gp_prefs");
+      return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
+    } catch {
+      return defaults;
+    }
+  });
   const [showHelpModal, setShowHelpModal] = useState(false);
 
+  /* Apply the active palette synchronously during render so the injected
+     <style> block and every ${C.*} reference see the CURRENT theme. Doing
+     this in an effect left the stylesheet one render behind — the source of
+     the dark/light "buggy" flip-flops. */
+  useMemo(() => applyTheme(minimalMode ? "minimal" : "default"), [minimalMode]);
   useEffect(() => {
-    applyTheme(minimalMode ? "minimal" : "default");
     try {
       localStorage.setItem("gp_theme_mode", minimalMode ? "minimal" : "default");
+      localStorage.setItem("gp_prefs", JSON.stringify(preferences));
     } catch {
       /* storage unavailable */
     }
-  }, [minimalMode]);
+  }, [minimalMode, preferences]);
 
   /* Persist the session so a reload keeps you signed in (no bounce to login). */
   useEffect(() => {
@@ -7370,59 +9013,92 @@ export default function GridPulseApp() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  /* Driver-defined liquid-glass level (0–100) → blur radius + panel opacity. */
+  const glassLevel = Math.max(0, Math.min(100, Number(preferences.glass) || 70));
+  const glassBlur = Math.round(2 + glassLevel * 0.22); // 2px → 24px
+  const glassAlphaDark = (0.05 + glassLevel * 0.0005).toFixed(4); // 0.05 → 0.10
+  const glassAlphaLight = (0.5 + glassLevel * 0.0045).toFixed(4); // 0.50 → 0.95
+
   return (
     <div className={`g-root ${minimalMode ? "g-root-minimal" : ""}`}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
         html, body, #root{
           margin:0; padding:0; width:100%; min-height:100%;
           background:${C.bg};
         }
         body{overflow-x:hidden;}
         .g-root{
-          --mono:'IBM Plex Mono',monospace;
-          --display:'Space Grotesk',sans-serif;
-          --body:'Inter',sans-serif;
+          /* ---- GRIDPULSE tokens (iOS liquid-glass inspired) ---- */
+          --mono:ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+          --display:-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+          --dot:-apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+          --body:-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+          --g-acc:${C.cyan};
+          --g-on-acc:#ffffff;
+          --g-acc-04:color-mix(in srgb, var(--g-acc) 4%, transparent);
+          --g-acc-05:color-mix(in srgb, var(--g-acc) 5%, transparent);
+          --g-acc-06:color-mix(in srgb, var(--g-acc) 6%, transparent);
+          --g-acc-08:${C.cyanSoft};
+          --g-acc-10:color-mix(in srgb, var(--g-acc) 10%, transparent);
+          --g-acc-12:color-mix(in srgb, var(--g-acc) 12%, transparent);
+          --g-acc-16:color-mix(in srgb, var(--g-acc) 16%, transparent);
+          --g-acc-20:color-mix(in srgb, var(--g-acc) 20%, transparent);
+          --g-acc-25:color-mix(in srgb, var(--g-acc) 25%, transparent);
+          --g-acc-30:color-mix(in srgb, var(--g-acc) 30%, transparent);
+          --g-acc-35:color-mix(in srgb, var(--g-acc) 35%, transparent);
+          --g-glow-a:rgba(10,132,255,0.16);
+          --g-glow-b:rgba(94,92,230,0.14);
+          --g-glow-c:rgba(0,122,255,0.08);
+          --g-grit:rgba(255,255,255,0.05);
+          --g-hover:rgba(255,255,255,0.06);
+          --g-shadow:0 24px 70px rgba(0,0,0,0.5);
           background:${C.bg}; color:${C.text}; font-family:var(--body);
           min-height:100vh; width:100%; position:relative; overflow-x:hidden;
         }
         .g-root.g-root-minimal{
           background: ${C.bg};
+          --g-glow-a:rgba(0,122,255,0.12);
+          --g-glow-b:rgba(94,92,230,0.10);
+          --g-glow-c:rgba(0,122,255,0.07);
+          --g-grit:rgba(0,0,0,0.05);
+          --g-hover:rgba(0,0,0,0.05);
+          --g-shadow:0 12px 32px rgba(40,40,60,0.10);
         }
-        .g-root.g-root-minimal .g-login-card,
-        .g-root.g-root-minimal .g-card,
-        .g-root.g-root-minimal .g-sidebar,
-        .g-root.g-root-minimal .g-topbar,
-        .g-root.g-root-minimal .g-notification-dropdown,
-        .g-root.g-root-minimal .g-modal,
-        .g-root.g-root-minimal .g-search-results {
-          backdrop-filter: blur(8px);
-          box-shadow: 0 8px 24px rgba(17, 17, 17, 0.06), 0 0 0 1px rgba(17, 17, 17, 0.04);
+        /* ---- iOS light: light-grey inputs + inner frosty surfaces ---- */
+        .g-root.g-root-minimal .g-role-btn .g-role-sub,
+        .g-root.g-root-minimal .g-gw-hint,
+        .g-root.g-root-minimal .g-brief-data,
+        .g-root.g-root-minimal .g-vehicle-plate{background:none;}
+        .g-root.g-root-minimal .g-login-metric{
+          background:linear-gradient(180deg, rgba(255,255,255,0.8), rgba(255,255,255,0.5));
         }
-        .g-root.g-root-minimal .g-login-card,
-        .g-root.g-root-minimal .g-card,
-        .g-root.g-root-minimal .g-sidebar,
-        .g-root.g-root-minimal .g-topbar,
-        .g-root.g-root-minimal .g-notification-dropdown,
-        .g-root.g-root-minimal .g-modal {
-          background: ${C.panelSolid};
-          border-color: ${C.border};
+        .g-root.g-root-minimal .g-ring-inner{background:${C.panelSolid};}
+        .g-root.g-root-minimal .g-map-leaflet,
+        .g-root.g-root-minimal .g-map-leaflet .leaflet-container{
+          background:#fff; background:linear-gradient(180deg, #ecebe6, #e4e2dc);
         }
-        .g-root.g-root-minimal .g-login-wrap{
-          gap: 28px;
-          padding-top: 40px;
-          padding-bottom: 36px;
+        .g-root.g-root-minimal .g-map-user-label{background:rgba(0,0,0,0.72); color:#fff;}
+        .g-root.g-root-minimal .g-vehicle-plate{color:#0c131a; border-color:rgba(10,10,10,0.12);}
+        .g-root.g-root-minimal .g-chat-fab,
+        .g-root.g-root-minimal .g-chat-avatar,
+        .g-root.g-root-minimal .g-chat-send{color:#fff;}
+        .g-root.g-root-minimal .g-chat-bubble{background:rgba(10,10,10,0.05);}
+        .g-root.g-root-minimal .g-search-bar{
+          background:rgba(255,255,255,0.88);
+          backdrop-filter: blur(16px) saturate(160%);
+          -webkit-backdrop-filter: blur(16px) saturate(160%);
+          border-color:rgba(0,0,0,0.10);
+          box-shadow:0 4px 16px rgba(30,30,40,0.07), inset 0 1px 0 rgba(255,255,255,0.7);
         }
-        .g-root.g-root-minimal .g-login-card{
-          box-shadow: 0 16px 40px rgba(17, 17, 17, 0.08);
+        .g-root.g-root-minimal .g-search-results{
+          box-shadow:0 18px 40px rgba(40,40,60,0.12);
         }
         .g-root::before{
           content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
-          background-image:
-            linear-gradient(rgba(112,225,255,0.05) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(112,225,255,0.05) 1px, transparent 1px);
-          background-size:48px 48px;
-          mask-image:radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 90%);
+          background:
+            radial-gradient(620px 420px at 10% -4%, var(--g-glow-a), transparent 62%),
+            radial-gradient(720px 460px at 96% 6%, var(--g-glow-b), transparent 64%),
+            radial-gradient(860px 520px at 50% 116%, var(--g-glow-c), transparent 62%);
         }
         .g-root *{box-sizing:border-box;}
         h1,h2,h3{font-family:var(--display); font-weight:600; margin:0;}
@@ -7443,12 +9119,12 @@ export default function GridPulseApp() {
         /* ---- login ---- */
         .g-login-wrap{
           position:relative; z-index:1; min-height:100vh; display:flex; flex-wrap:wrap;
-          align-items:center; gap:48px; padding:56px 7vw;
+          align-items:center; justify-content:center; gap:48px; padding:56px 7vw;
         }
         .g-login-brand{flex:1 1 380px; max-width:520px;}
         .g-login-badge{
           display:inline-flex; align-items:center; gap:8px; padding:7px 12px; margin-top:18px;
-          border-radius:999px; border:1px solid rgba(92, 220, 255, 0.35); background:rgba(92,220,255,0.08);
+          border-radius:999px; border:1px solid var(--g-acc-35); background:var(--g-acc-08);
           color:${C.cyan}; font-size:10.5px; font-family:var(--mono); letter-spacing:.1em; text-transform:uppercase;
         }
         .g-login-headline{font-size:clamp(26px,3vw,38px); line-height:1.08; margin:20px 0 14px; letter-spacing:-0.03em; max-width:540px;}
@@ -7465,11 +9141,17 @@ export default function GridPulseApp() {
 
         /* ---- gravitas-inspired polish (professional) ---- */
         .g-grad-text{
-          display:inline-block; margin-left:8px; background:linear-gradient(100deg, ${C.cyan} 0%, #9df1ff 45%, ${C.amber} 100%);
+          display:inline-block; margin-left:8px; background:linear-gradient(100deg, ${C.cyan} 0%, #7a5af5 100%);
           -webkit-background-clip:text; background-clip:text; color:transparent;
         }
-        .g-window{display:inline-block; animation:g-wind .55s cubic-bezier(.22,1,.36,1);}
-        @keyframes g-wind{from{opacity:0; transform:translateY(10px); filter:blur(4px);} to{opacity:1; transform:translateY(0); filter:blur(0);}}
+        .g-window{display:inline-block; vertical-align:bottom;}
+        .g-window-mask{display:block; height:1.25em; overflow:hidden;}
+        .g-window-track{display:block; transition:transform .55s cubic-bezier(.22,1,.36,1);}
+        .g-window-word{display:block; height:1.25em; line-height:1.25em; white-space:nowrap;}
+        .g-grad-text .g-window-word{
+          background:linear-gradient(100deg, ${C.cyan} 0%, #7a5af5 100%);
+          -webkit-background-clip:text; background-clip:text; color:transparent;
+        }
         .g-login-stack{display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:24px;}
         .g-stack-label{font-family:var(--mono); font-size:9.5px; letter-spacing:.16em; color:${C.textDimmer}; margin-right:4px;}
         .g-stack-chip{
@@ -7506,6 +9188,7 @@ export default function GridPulseApp() {
         }
         .g-marquee-sep{color:${C.cyan}; font-size:7px; opacity:.7;}
         @keyframes g-scroll{to{transform:translateX(-50%);}}
+        @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
         .g-gateway-marquee{margin:4px 0 20px;}
         .g-page-display h2{font-family:var(--display); font-weight:700; font-size:clamp(26px,3.2vw,36px); letter-spacing:-0.02em; line-height:1.05;}
         .g-eyebrow{
@@ -7516,18 +9199,18 @@ export default function GridPulseApp() {
 
         .g-login-card{
           flex:1 1 360px; max-width:430px; background:linear-gradient(180deg, rgba(17,26,36,0.9), rgba(10,15,22,0.97));
-          border:1px solid ${C.border}; box-shadow:0 24px 60px rgba(0,0,0,0.32), 0 0 0 1px rgba(92,220,255,0.06);
+          border:1px solid ${C.border}; box-shadow:0 24px 60px rgba(0,0,0,0.32), 0 0 0 1px var(--g-acc-06);
           border-radius:22px; backdrop-filter:blur(18px); padding:28px; position:relative; z-index:1;
         }
         .g-login-card::before{content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
-          background:radial-gradient(circle at top left, rgba(92,220,255,0.12), transparent 38%);}
+          background:radial-gradient(circle at top left, var(--g-acc-12), transparent 38%);}
         .g-role-toggle{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px; position:relative; z-index:1;}
         .g-role-btn{
           display:flex; align-items:center; gap:10px; text-align:left; padding:12px; border-radius:12px; border:1px solid ${C.border};
           background:rgba(255,255,255,0.02); color:${C.text}; transition:border-color .2s ease, background .2s ease, transform .2s ease;
         }
         .g-role-btn:hover{transform:translateY(-1px); border-color:${C.cyan};}
-        .g-role-btn.active{border-color:${C.cyan}; background:${C.cyanSoft}; box-shadow:inset 0 0 0 1px rgba(92,220,255,0.12);}
+        .g-role-btn.active{border-color:${C.cyan}; background:${C.cyanSoft}; box-shadow:inset 0 0 0 1px var(--g-acc-12);}
         .g-role-title{font-size:13px; font-weight:600;}
         .g-role-sub{font-size:11px; color:${C.textDimmer};}
 
@@ -7540,7 +9223,7 @@ export default function GridPulseApp() {
           display:flex; align-items:center; gap:10px; border:1px solid ${C.border}; border-radius:12px;
           padding:11px 12px; background:rgba(255,255,255,0.02); transition:border-color .2s ease, box-shadow .2s ease;
         }
-        .g-field:focus-within{border-color:${C.cyan}; box-shadow:0 0 0 3px rgba(92,220,255,0.08);}
+        .g-field:focus-within{border-color:${C.cyan}; box-shadow:0 0 0 3px var(--g-acc-08);}
         .g-field input{background:none; border:none; outline:none; color:${C.text}; font-size:13.5px; width:100%;}
         .g-field input::placeholder{color:${C.textDimmer};}
         .g-field-action{display:flex; align-items:center; justify-content:center; flex-shrink:0; padding:4px; border:0; background:none; color:${C.textDimmer}; border-radius:6px;}
@@ -7573,7 +9256,7 @@ export default function GridPulseApp() {
 
         .g-btn-primary{
           margin-top:6px; padding:12px; border-radius:10px; border:none; text-align:center;
-          background:${C.cyan}; color:#001217; font-weight:600; font-size:13.5px;
+          background:${C.cyan}; color:var(--g-on-acc); font-weight:600; font-size:13.5px;
         }
         .g-btn-ghost{
           display:flex; align-items:center; gap:6px; background:none; border:1px solid ${C.border};
@@ -7634,7 +9317,7 @@ export default function GridPulseApp() {
           border-bottom:1px solid ${C.borderSoft}; transition:background .15s ease;
         }
         .g-notification-item:hover{background:rgba(255,255,255,0.02);}
-        .g-notification-item.unread{background:rgba(79,227,255,0.04);}
+        .g-notification-item.unread{background:var(--g-acc-04);}
         .g-notification-icon{flex-shrink:0; margin-top:2px;}
         .g-notification-content{flex:1; min-width:0;}
         .g-notification-message{
@@ -7657,7 +9340,7 @@ export default function GridPulseApp() {
           position:sticky; top:0; align-self:stretch;
           min-height:calc(100vh - 65px);
           border-right:1px solid ${C.borderSoft};
-          background:rgba(5,9,13,0.55);
+          background:${C.bg};
         }
         .g-sidebar-nav{display:flex; flex-direction:column; gap:4px;}
         .g-sidebar-link{
@@ -7669,6 +9352,22 @@ export default function GridPulseApp() {
         .g-sidebar-link:hover{color:${C.text}; background:rgba(255,255,255,0.03);}
         .g-sidebar-link.active{background:${C.cyanSoft}; color:${C.text};}
         .g-sidebar-badge{margin-left:auto; font-size:10px; background:${C.red}; color:#25000a; padding:1px 7px; border-radius:20px; font-family:var(--mono); font-weight:600;}
+
+        /* sidebar collapse toggle */
+        .g-sidebar-collapse-btn{
+          display:flex; align-items:center; justify-content:flex-end; width:100%;
+          padding:0 6px 16px; background:none; border:none; color:${C.textDimmer};
+          cursor:pointer; transition:color .15s ease;
+        }
+        .g-sidebar-collapse-btn:hover{color:${C.text};}
+
+        .g-sidebar{transition:width .18s ease, padding .18s ease;}
+        .g-sidebar-collapsed{width:64px; padding:28px 10px;}
+        .g-sidebar-collapsed .g-sidebar-collapse-btn{justify-content:center; padding:0 0 16px;}
+        .g-sidebar-collapsed .g-sidebar-link{justify-content:center; padding:11px;}
+        .g-sidebar-collapsed .g-sidebar-link span,
+        .g-sidebar-collapsed .g-sidebar-badge{display:none;}
+        .g-sidebar-collapsed .g-sidebar-car{display:none;}
         .g-main{flex:1; min-width:0;}
 
         /* ---- sidebar car panel ---- */
@@ -7733,8 +9432,8 @@ export default function GridPulseApp() {
         }
         .g-shortcut-description{font-size:13px; color:${C.text}; line-height:1.4;}
         .g-modal-tip{
-          display:flex; gap:10px; padding:12px; border-radius:10px; background:rgba(79,227,255,0.06);
-          border:1px solid rgba(79,227,255,0.2); font-size:12px; color:${C.text}; line-height:1.4;
+          display:flex; gap:10px; padding:12px; border-radius:10px; background:var(--g-acc-06);
+          border:1px solid var(--g-acc-20); font-size:12px; color:${C.text}; line-height:1.4;
         }
 
         @media(max-width:860px){
@@ -7744,16 +9443,28 @@ export default function GridPulseApp() {
             position:fixed; left:-100%; top:0; bottom:0; width:280px; z-index:999;
             transform:translateX(-100%); transition:transform .3s ease;
           }
+          .g-sidebar-collapsed{width:280px; padding:28px 16px;}
+          .g-sidebar-collapsed .g-sidebar-link span,
+          .g-sidebar-collapsed .g-sidebar-badge,
+          .g-sidebar-collapsed .g-sidebar-car{display:revert;}
           .g-sidebar.g-sidebar-mobile-open{transform:translateX(0);}
           .g-sidebar-nav{padding-top:60px;}
+          .g-sidebar-collapse-btn{display:none;}
         }
 
         /* ---- search bar ---- */
-        .g-search-wrapper{position:relative; margin-bottom:20px;}
+        .g-search-wrapper{position:relative; margin:18px 4px 24px;}
         .g-search-bar{
-          display:flex; align-items:center; gap:10px; padding:10px 14px;
-          border:1px solid ${C.border}; border-radius:12px; background:${C.panel};
-          box-shadow:0 4px 16px rgba(79,227,255,0.06); position:relative; z-index:10;
+          display:flex; align-items:center; gap:10px; padding:12px 18px;
+          border:1px solid ${C.border}; border-radius:16px; background:rgba(255,255,255,0.09);
+          backdrop-filter: blur(18px) saturate(160%);
+          -webkit-backdrop-filter: blur(18px) saturate(160%);
+          box-shadow:0 10px 30px var(--g-shadow), inset 0 1px 0 rgba(255,255,255,0.12);
+          position:relative; z-index:10;
+        }
+        .g-search-bar:focus-within{
+          border-color:${C.cyan};
+          box-shadow:0 10px 30px var(--g-shadow), inset 0 0 0 1px ${C.cyanSoft};
         }
         .g-search-bar input{
           flex:1; background:none; border:none; outline:none; color:${C.text}; font-size:13.5px;
@@ -7786,9 +9497,32 @@ export default function GridPulseApp() {
           background:none; border:none; text-align:left; transition:background .15s ease;
         }
         .g-search-result-item:hover{background:rgba(255,255,255,0.04);}
+        .g-search-result-active{
+          background:var(--g-acc-06, rgba(10,132,255,0.10));
+          box-shadow:inset 3px 0 0 ${C.cyan};
+        }
+        .g-search-result-active:hover{background:var(--g-acc-06, rgba(10,132,255,0.10));}
         .g-search-result-content{flex:1; min-width:0;}
         .g-search-result-title{font-size:13px; font-weight:500; color:${C.text}; margin-bottom:2px;}
         .g-search-result-sub{font-size:11px; color:${C.textDimmer}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+        .g-search-result-icon{flex-shrink:0; display:flex; align-items:center; justify-content:center; width:18px;}
+        .g-search-result-badge{
+          flex-shrink:0; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em;
+          padding:2px 6px; border-radius:999px; background:rgba(255,255,255,0.06);
+        }
+        .g-search-result-hint{
+          flex-shrink:0; font-size:11px; color:${C.textDimmer}; opacity:0; transition:opacity .15s ease;
+        }
+        .g-search-result-active .g-search-result-hint, .g-search-result-item:hover .g-search-result-hint{opacity:1;}
+        .g-search-highlight{
+          background:var(--g-acc-16, rgba(10,132,255,0.16)); color:${C.text};
+          border-radius:3px; padding:0 2px; font-weight:700;
+        }
+        .g-search-footer{
+          padding:9px 16px; font-size:11px; color:${C.textDimmer}; border-top:1px solid ${C.borderSoft};
+          display:flex; align-items:center; gap:6px; white-space:nowrap;
+        }
+        .g-search-footer b{color:${C.textDim}; font-weight:600; font-family:var(--mono); font-size:10px;}
 
         /* ---- quick schedules ---- */
         .g-quick-schedules{display:flex; flex-direction:column; gap:8px;}
@@ -7816,7 +9550,17 @@ export default function GridPulseApp() {
         .g-bill-estimator{display:flex; flex-direction:column; gap:14px; margin-top:16px; padding:14px 16px; border:1px solid ${C.border}; border-radius:12px; background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));}
         .g-bill-estimator-header{display:flex; align-items:flex-start; justify-content:space-between; gap:12px;}
         .g-bill-estimator-label{font-size:10.5px; color:${C.textDim}; letter-spacing:0.12em; text-transform:uppercase; font-family:var(--mono);}
-        .g-bill-estimator-total{font-size:26px; font-weight:700; letter-spacing:-0.03em; color:${C.text}; font-family:var(--display);}
+        .g-bill-estimator-total{font-size:26px; font-weight:700; letter-spacing:-0.03em; color:${C.text}; font-family:var(--dot);}
+        .g-bill-estimator-per{font-size:11px; color:${C.textDimmer}; font-family:var(--mono); letter-spacing:0.05em; margin-left:4px; font-weight:500;}
+        .g-bill-estimator-actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end;}
+        .g-bill-customize{
+          display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:9px;
+          border:1px solid ${C.border}; background:rgba(255,255,255,0.02); color:${C.textDim};
+          font-size:11px; font-family:var(--mono); letter-spacing:0.05em; text-transform:uppercase;
+          transition:border-color .15s ease, background .15s ease, color .15s ease;
+        }
+        .g-bill-customize:hover{border-color:${C.cyan}; color:${C.cyan};}
+        .g-bill-customize.active{background:${C.cyanSoft}; border-color:${C.cyan}; color:${C.cyan};}
         .g-bill-estimator-badge{display:inline-flex; align-items:center; justify-content:center; padding:5px 9px; border-radius:999px; border:1px solid ${C.border}; background:${C.cyanSoft}; color:${C.text}; font-size:10.5px; font-family:var(--mono); letter-spacing:0.06em; text-transform:uppercase;}
         .g-bill-estimator-grid{display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px;}
         .g-bill-estimator-stat{display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:10px; border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.015);}
@@ -7824,7 +9568,49 @@ export default function GridPulseApp() {
         .g-bill-estimator-stat strong{font-size:15px; color:${C.text}; font-family:var(--mono); font-weight:600;}
         .g-bill-estimator-footer{display:flex; justify-content:space-between; align-items:center; gap:12px; padding-top:2px; font-size:12px; color:${C.textDim};}
         .g-bill-estimator-footer strong{color:${C.green};}
-        @media(max-width:640px){ .g-smart-charge-grid{grid-template-columns:1fr;} .g-bill-estimator-grid{grid-template-columns:repeat(2, minmax(0, 1fr));} }
+        .g-bill-estimator-note{
+          margin-top:4px; padding:9px 11px; border-radius:9px; font-size:11.5px; line-height:1.5;
+          border:1px solid var(--g-acc-25); background:var(--g-acc-06); color:${C.textDim};
+        }
+        .g-bill-customizer{
+          display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; margin-top:12px;
+          padding:12px; border-radius:11px; border:1px solid ${C.border}; background:rgba(255,255,255,0.02);
+        }
+        .g-bill-field{display:flex; flex-direction:column; gap:5px; min-width:0;}
+        .g-bill-field-label{font-size:10px; color:${C.textDim}; font-family:var(--mono); letter-spacing:0.06em; text-transform:uppercase;}
+        .g-bill-field input{
+          border:1px solid ${C.border}; border-radius:9px; padding:8px 10px;
+          background:rgba(255,255,255,0.03); color:${C.text}; font-size:12.5px; outline:none;
+          font-family:var(--mono); width:100%;
+        }
+        .g-bill-field input:focus{border-color:${C.cyan};}
+        .g-bill-field-hint{font-size:10px; color:${C.textDimmer};}
+        .g-bill-field-suffix{display:flex; align-items:center; gap:6px;}
+        .g-bill-field-suffix input{flex:1;}
+        .g-bill-field-suffix span{font-size:11px; color:${C.textDim}; font-family:var(--mono);}
+        .g-bill-reset{
+          grid-column:1 / -1; display:inline-flex; align-items:center; gap:6px; justify-self:start;
+          margin-top:2px; padding:7px 12px; border-radius:8px; border:1px solid ${C.border};
+          background:none; color:${C.textDimmer}; font-size:11px; font-family:var(--mono);
+          letter-spacing:0.05em; text-transform:uppercase; transition:border-color .15s ease, color .15s ease;
+        }
+        .g-bill-reset:hover{border-color:${C.red}; color:${C.red};}
+        .g-bill-monthly-break{
+          display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px; margin-top:10px;
+        }
+        .g-bill-monthly-break>div{
+          display:flex; flex-direction:column; gap:3px; padding:9px 11px; border-radius:9px;
+          border:1px dashed ${C.borderSoft}; background:rgba(255,255,255,0.01);
+        }
+        .g-bill-monthly-break .g-bill-label{font-size:9.5px; color:${C.textDimmer}; letter-spacing:0.08em; text-transform:uppercase; font-family:var(--mono);}
+        .g-bill-monthly-break strong{font-size:14px; color:${C.text}; font-family:var(--mono); font-weight:600;}
+        .g-bill-monthly-break .g-bill-monthly-total{border-style:solid; border-color:var(--g-acc-25); background:var(--g-acc-06);}
+        @media(max-width:640px){
+          .g-smart-charge-grid{grid-template-columns:1fr;}
+          .g-bill-estimator-grid{grid-template-columns:repeat(2, minmax(0, 1fr));}
+          .g-bill-customizer{grid-template-columns:1fr;}
+          .g-bill-monthly-break{grid-template-columns:repeat(2, minmax(0,1fr));}
+        }
         .g-smart-charge-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:8px;}
         .g-smart-chip{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border:1px solid ${C.border}; border-radius:10px; background:rgba(255,255,255,0.02);}
         .g-smart-chip-l{font-size:12px; color:${C.text};}
@@ -7843,7 +9629,7 @@ export default function GridPulseApp() {
         .g-prediction-predicted{color:${C.cyan}; font-weight:600;}
         .g-prediction-summary{
           display:flex; gap:10px; margin-top:12px; padding:10px 12px; border-radius:8px;
-          background:rgba(79,227,255,0.06); border:1px solid rgba(79,227,255,0.2); font-size:11.5px;
+          background:var(--g-acc-06); border:1px solid var(--g-acc-20); font-size:11.5px;
           color:${C.text}; line-height:1.4;
         }
 
@@ -7857,7 +9643,7 @@ export default function GridPulseApp() {
         .g-insight-expanded{border-color:${C.cyan};}
         .g-insight-alert{border-color:rgba(255,93,120,0.3); background:rgba(255,93,120,0.06);}
         .g-insight-success{border-color:rgba(51,231,160,0.3); background:rgba(51,231,160,0.06);}
-        .g-insight-info{border-color:rgba(79,227,255,0.3); background:rgba(79,227,255,0.06);}
+        .g-insight-info{border-color:var(--g-acc-30); background:var(--g-acc-06);}
         .g-insight-warning{border-color:rgba(255,182,72,0.3); background:rgba(255,182,72,0.06);}
         .g-insight-header{display:flex; gap:12px; cursor:pointer; align-items:flex-start;}
         .g-insight-header-button{width:100%; padding:0; border:0; background:none; color:inherit; text-align:left; font:inherit;}
@@ -7886,9 +9672,9 @@ export default function GridPulseApp() {
         }
         .g-insight-action-btn:hover{border-color:${C.cyan}; background:${C.cyanSoft};}
         .g-insight-action-primary{
-          background:${C.cyan}; color:#001217; border-color:${C.cyan};
+          background:${C.cyan}; color:var(--g-on-acc); border-color:${C.cyan};
         }
-        .g-insight-action-primary:hover{background:${C.cyan}; color:#001217; border-color:${C.cyan}; opacity:0.9;}
+        .g-insight-action-primary:hover{background:${C.cyan}; color:var(--g-on-acc); border-color:${C.cyan}; opacity:0.9;}
         .g-insight-dismiss-btn{
           padding:8px 16px; border-radius:8px; border:1px solid ${C.border}; background:none;
           color:${C.textDimmer}; font-size:12px; transition:border-color .15s ease, color .15s ease;
@@ -7925,7 +9711,14 @@ export default function GridPulseApp() {
           background:linear-gradient(180deg, #0d1520, #0b1119);
           border:1px solid ${C.border}; border-radius:12px; overflow:hidden;
         }
-        .g-map-leaflet .leaflet-container{height:100%; width:100%; background:#0b1119;}
+        .g-map-leaflet .leaflet-container{height:100%; width:100%; background:#0b1119; outline:none;}
+        .g-map-leaflet .leaflet-attribution-flag{display:none;}
+        .g-map-leaflet .leaflet-control-attribution{
+          background:rgba(7,11,15,0.62); color:rgba(255,255,255,0.45); font-size:9.5px;
+          padding:2px 8px; border-radius:8px 0 0 0; backdrop-filter:blur(6px);
+        }
+        .g-map-leaflet .leaflet-control-attribution a{color:rgba(133,161,188,0.85);}
+        .g-map-leaflet .leaflet-control-attribution a:hover{color:${C.cyan};}
         .g-map-leaflet .leaflet-control-zoom a{background:${C.panelSolid}; color:${C.text}; border-color:${C.border};}
         .g-map-leaflet .leaflet-control-zoom a:hover{background:rgba(255,255,255,0.08); color:${C.cyan};}
         .g-map-leaflet .leaflet-bar{border:1px solid ${C.border}; box-shadow:0 8px 24px rgba(0,0,0,0.3);}
@@ -7961,6 +9754,256 @@ export default function GridPulseApp() {
         }
         .g-lf-pin-national::after{display:none;}
         .g-lf-pin-national:hover,.g-lf-pin-national:focus{opacity:1; transform:scale(1.4);}
+
+        /* ---- charger map: clusters, selection, route, basemap switch ---- */
+        .g-lf-cluster{
+          width:26px; height:26px; border-radius:50%;
+          background:${C.cyan}; border:2px solid rgba(255,255,255,.9);
+          color:rgba(8,20,24,.9); font-weight:700; font-size:11px; line-height:22px; text-align:center;
+          box-shadow:0 4px 14px rgba(0,0,0,.45), 0 0 0 6px color-mix(in srgb, ${C.cyan} 22%, transparent);
+          transition:transform .12s ease;
+        }
+        .g-lf-cluster:hover{transform:scale(1.12);}
+        .g-lf-pin-hover{transform:scale(1.35); opacity:1;}
+        .g-lf-pin-selected{
+          border-color:#fff; animation:g-pin-selected 1.4s ease-out infinite;
+        }
+        @keyframes g-pin-selected{
+          0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--pin) 55%, transparent);}
+          100%{box-shadow:0 0 0 12px transparent;}
+        }
+        .g-route-line{
+          stroke-dasharray:1 10; animation:g-route-dash 700ms linear infinite;
+          filter:drop-shadow(0 0 3px ${C.cyan});
+        }
+        @keyframes g-route-dash{to{stroke-dashoffset:-22;}}
+        .g-basemap-switch{
+          position:absolute; top:12px; right:12px; z-index:1010; display:flex; gap:4px;
+          background:${C.panelSolid}; border:1px solid ${C.border}; border-radius:10px; padding:4px;
+          box-shadow:0 6px 18px rgba(0,0,0,.35);
+        }
+        .g-basemap-btn{
+          width:28px; height:28px; display:flex; align-items:center; justify-content:center;
+          border-radius:7px; border:1px solid transparent; background:none; color:${C.textDim}; cursor:pointer;
+          transition:background .12s ease, color .12s ease, transform .12s ease, border-color .12s ease;
+        }
+        .g-basemap-btn:hover{color:${C.text}; transform:translateY(-1px);}
+        .g-basemap-btn.active{background:${C.cyanSoft}; color:${C.cyan}; border-color:${C.cyan}55;}
+
+        /* ---- iOS-style micro animations ---- */
+        .g-anim-rise{animation:g-rise .5s cubic-bezier(.34,1.56,.64,1) both;}
+        @keyframes g-rise{from{opacity:0; transform:translateY(10px) scale(.99);}to{opacity:1; transform:none;}}
+        .g-shimmer{
+          background:linear-gradient(90deg, ${C.border} 25%, ${C.cyanSoft} 50%, ${C.border} 75%);
+          background-size:200% 100%; animation:g-shimmer 1.15s linear infinite; border-radius:6px; min-height:10px;
+        }
+        @keyframes g-shimmer{from{background-position:200% 0;}to{background-position:-200% 0;}}
+
+        /* ---- live stats bar ---- */
+        .g-live-stats{display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:16px;}
+        .g-live-stat{
+          background:rgba(255,255,255,0.02); border:1px solid ${C.border}; border-radius:12px; padding:12px 14px;
+          display:flex; flex-direction:column; gap:2px; transition:border-color .15s ease, transform .15s ease;
+        }
+        .g-live-stat:hover{border-color:${C.cyan}55; transform:translateY(-1px);}
+        .g-live-stat-v{font-size:20px; font-weight:700; color:${C.text}; letter-spacing:-.02em;}
+        .g-live-stat-l{font-size:11px; color:${C.textDimmer}; letter-spacing:.02em;}
+
+        /* ---- search: chips + pending ---- */
+        .g-locsearch-pending{display:inline-flex; align-items:center; gap:6px; color:${C.textDim};}
+        .g-locsearch-chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+        .g-chip-btn{margin-left:6px; padding:2px 8px; font-size:11.5px; border-radius:14px;}
+        .g-chip-mini{font-size:11px; padding:2px 8px;}
+        .g-rating-tag{color:${C.amber}; font-size:11px; font-weight:600; margin-left:6px;}
+        .g-badge-tiny{font-size:9px; font-weight:700; letter-spacing:.06em; padding:1px 6px; border-radius:999px; vertical-align:middle;}
+        .g-badge-ultra{color:#0a1a20; background:#b0f3ff; border:1px solid #7fe6f7;}
+        .g-badge-fast{color:#0a2410; background:#b9f6c9; border:1px solid #8ceba8;}
+        .g-amenity-chips{display:flex; gap:5px; flex-wrap:wrap;}
+
+        .g-select{
+          border:1px solid ${C.border}; border-radius:10px; padding:8px 10px; max-width:180px; width:100%;
+          background:${C.panelSolid}; color:${C.text}; font-size:12.5px; font-family:inherit; outline:none; cursor:pointer;
+        }
+        .g-select:hover{border-color:${C.cyan};}
+        .g-radius-slider{flex:1 1 100%; margin-top:4px;}
+        .g-radius-slider input[type=range]{width:100%; accent-color:${C.cyan};}
+        .g-trip-busy{color:${C.cyan};}
+
+        @media (prefers-reduced-motion: reduce){
+          .g-anim-rise, .g-lf-cluster, .g-lf-pin-hover, .g-lf-pin-selected, .g-shimmer, .g-route-line {animation:none;}
+          .g-map-details, .g-basemap-btn{transition:none;}
+          .g-live-stat{transform:none !important;}
+          .g-page-enter, .g-notification-badge, .g-sidebar-link.active svg,
+          .g-notification-btn:hover svg, .g-minimal-toggle:hover svg,
+          .g-modal, .g-modal-overlay, .g-wobble{animation:none;}
+        }
+
+        /* ---- iOS micro-interactions v2: press, pop, hop, wobble, sheet ---- */
+        .g-page-enter{animation:g-pagein .36s cubic-bezier(.22,1,.36,1) both;}
+        @keyframes g-pagein{from{opacity:0; transform:translateY(10px);}to{opacity:1; transform:none;}}
+
+        .g-notification-badge{animation:g-pop .5s cubic-bezier(.34,1.56,.64,1) both; transform-origin:top right;}
+        @keyframes g-pop{0%{transform:scale(1.6); opacity:.4;}55%{transform:scale(.88); opacity:1;}100%{transform:scale(1);}}
+
+        .g-sidebar-link.active svg{animation:g-hop .55s cubic-bezier(.34,1.56,.64,1);}
+        @keyframes g-hop{
+          0%{transform:translateY(0) scale(1);}
+          35%{transform:translateY(-3px) scale(1.18) rotate(-5deg);}
+          62%{transform:translateY(0) scale(.95) rotate(2deg);}
+          100%{transform:none;}
+        }
+
+        /* bell + login theme pill give a little flag wobble when hovered */
+        .g-notification-btn:hover svg, .g-minimal-toggle:hover svg{animation:g-wobble .5s cubic-bezier(.34,1.56,.64,1);}
+        @keyframes g-wobble{
+          0%,100%{transform:rotate(0deg);}
+          25%{transform:rotate(-10deg) scale(1.08);}
+          60%{transform:rotate(8deg) scale(1.04);}
+          80%{transform:rotate(-4deg);}
+        }
+
+        /* springy press-scale on tap, and iOS tap-highlight reset */
+        .g-root button, .g-root a, .g-root [role=button], .g-root input, .g-root select, .g-root textarea{-webkit-tap-highlight-color:transparent;}
+        /* Kill the browser's light click-focus ring: mousedown shouldn't draw a
+           white outline; keep a visible keyboard/focus-visible ring instead. */
+        .g-root :is(button, a, [role=button], input, select, textarea, .g-role-btn, .g-chat-chip):focus{outline:none;}
+        .g-root :is(button, a, [role=button], input, select, textarea, [tabindex]):focus-visible{outline:2px solid color-mix(in srgb, ${C.cyan} 78%, white); outline-offset:2px;}
+        .g-root .g-btn-primary, .g-root .g-btn-ghost, .g-root .g-btn-danger,
+        .g-root .g-chip-btn, .g-root .g-chip-mini, .g-root .g-demo-chip,
+        .g-root .g-role-btn, .g-root .g-social-btn, .g-root .g-tab,
+        .g-root .g-notification-btn, .g-root .g-sidebar-collapse-btn,
+        .g-root .g-field-action, .g-root .g-basemap-btn, .g-root .g-minimal-toggle,
+        .g-root .g-sidebar-link, .g-root .g-sidebar-car{
+          transition:transform .22s cubic-bezier(.34,1.56,.64,1), background .16s ease,
+                     border-color .16s ease, color .16s ease, box-shadow .16s ease, opacity .16s ease;
+        }
+        .g-root .g-btn-primary:active{transform:scale(.98);}
+        .g-root .g-btn-ghost:active, .g-root .g-btn-danger:active{transform:scale(.97);}
+        .g-root .g-chip-btn:active, .g-root .g-chip-mini:active, .g-root .g-demo-chip:active,
+        .g-root .g-role-btn:active, .g-root .g-social-btn:active, .g-root .g-tab:active,
+        .g-root .g-notification-btn:active, .g-root .g-sidebar-collapse-btn:active,
+        .g-root .g-field-action:active, .g-root .g-basemap-btn:active,
+        .g-root .g-minimal-toggle:active, .g-root .g-sidebar-link:active,
+        .g-root .g-sidebar-car:active{transform:scale(.94);}
+
+        /* modal + product panel springs in from below, iOS sheet style */
+        .g-modal-overlay{animation:g-fade .2s ease both;}
+        .g-modal{animation:g-sheet .45s cubic-bezier(.34,1.56,.64,1) both;}
+        @keyframes g-fade{from{opacity:0;}to{opacity:1;}}
+        @keyframes g-sheet{
+          0%{opacity:0; transform:translateY(22px) scale(.96);}
+          60%{opacity:1; transform:translateY(-3px) scale(1.006);}
+          100%{opacity:1; transform:none;}
+        }
+
+        /* ---- iOS micro-interactions v3: alive cards, morphing pills, dots,
+               juice press, chart hover, spatial detail, KPI ripples ---- */
+
+        /* Charger cards: land with a tiny overshoot blip, then a faint glow
+           sweeps around the status dot once — never a loop. */
+        .g-list-row.g-list-row-button{
+          animation:g-rise .5s cubic-bezier(.34,1.56,.64,1) both, g-alive 1s ease both;
+        }
+        @keyframes g-alive{0%{transform:scale(1);}40%{transform:scale(1.012);}70%{transform:scale(.997);}100%{transform:scale(1);}}
+
+        /* Status pill morphs in place when its value changes, not a hard swap. */
+        .g-badge{animation:g-pillmorph .4s cubic-bezier(.34,1.56,.64,1) both;}
+        @keyframes g-pillmorph{0%{transform:scale(.82); filter:blur(2px); opacity:.35;}100%{transform:scale(1); filter:blur(0); opacity:1;}}
+
+        /* Connection dots: the accent ring expands outward once as the state
+           lands, then settles into the quiet dot. Optional slow pulse is used
+           only for genuinely transient "connecting/testing" states. */
+        .g-dot{position:relative;}
+        .g-dot::after{content:""; position:absolute; inset:0; border-radius:50%; pointer-events:none;
+          box-shadow:0 0 0 0 color-mix(in srgb, var(--dotc, var(--g-acc, #4cc9f0)) 42%, transparent);
+          animation:g-dotpop .9s ease-out .12s both;}
+        @keyframes g-dotpop{to{box-shadow:0 0 0 13px transparent;}}
+        .g-dot-pulse{animation:g-dotpulse 1.5s ease-in-out infinite;}
+        @keyframes g-dotpulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+        /* Liquid-glass press: rest -> compress -> overshoot -> rest. */
+        .g-trip-actions .g-btn-primary:active, .g-ocpp-btn:active, .g-chat-send:active,
+        .g-gps-prompt-btn.primary:active, .g-view-mode-btn:active{animation:g-juice .34s cubic-bezier(.34,1.56,.64,1);}
+        @keyframes g-juice{0%{transform:scale(1);}30%{transform:scale(.96);}65%{transform:scale(1.02);}100%{transform:scale(1);}}
+
+        /* Chart hover: a crosshair rides the cursor, the hit point grows with a
+           soft glow, and the tooltip rattle-lands into place. */
+        .g-chart-tip{animation:g-tipin .16s cubic-bezier(.34,1.56,.64,1) both; transform-origin:50% 100%;}
+        @keyframes g-tipin{from{opacity:0; transform:translateY(5px) scale(.92);}to{opacity:1; transform:none;}}
+        .g-chart-active-dot{filter:drop-shadow(0 0 6px ${C.cyan});}
+
+        /* Map -> detail: the panel grows out of the tapped marker, instead of a
+           flat page swap. Origin is set from the marker's screen position. */
+        .g-map-details{
+          animation:g-detailin .5s cubic-bezier(.34,.92,.38,1) both;
+          transform-origin:var(--ox, 30px) var(--oy, 220px);
+        }
+        @keyframes g-detailin{
+          0%{opacity:0; transform:scale(.62) translateY(30px);}
+          60%{opacity:1; transform:scale(1.015) translateY(-4px);}
+          100%{opacity:1; transform:none;}
+        }
+
+        /* KPI + live-stat cards: staggered rise, count-up, one-shot ripple
+           radiating from the icon corner. */
+        .g-live-stats.g-anim-rise{animation:none;}
+        .g-live-stats .g-live-stat{animation:g-rise .5s cubic-bezier(.34,1.56,.64,1) both;}
+        .g-live-stats .g-live-stat:nth-child(2){animation-delay:.06s;}
+        .g-live-stats .g-live-stat:nth-child(3){animation-delay:.12s;}
+        .g-live-stats .g-live-stat:nth-child(4){animation-delay:.18s;}
+        .g-kpi{
+          position:relative; overflow:hidden;
+          animation:g-rise .5s cubic-bezier(.34,1.56,.64,1) both;
+        }
+        .g-grid-4 .g-kpi:nth-child(1){animation-delay:.02s;}
+        .g-grid-4 .g-kpi:nth-child(2){animation-delay:.07s;}
+        .g-grid-4 .g-kpi:nth-child(3){animation-delay:.12s;}
+        .g-grid-4 .g-kpi:nth-child(4){animation-delay:.17s;}
+        .g-kpi::after{content:""; position:absolute; top:0; right:0; width:64px; height:64px; pointer-events:none;
+          border-radius:50%; transform:translate(32%,-32%) scale(0); transform-origin:100% 0%;
+          background:radial-gradient(circle, color-mix(in srgb, var(--g-acc, #4cc9f0) 30%, transparent) 0%, transparent 72%);
+          animation:g-ripple 1s ease-out .3s both;}
+        .g-grid-4 .g-kpi:nth-child(1)::after{animation-delay:.32s;}
+        .g-grid-4 .g-kpi:nth-child(2)::after{animation-delay:.37s;}
+        .g-grid-4 .g-kpi:nth-child(3)::after{animation-delay:.42s;}
+        .g-grid-4 .g-kpi:nth-child(4)::after{animation-delay:.47s;}
+        @keyframes g-ripple{0%{transform:translate(32%,-32%) scale(0); opacity:1;}100%{transform:translate(-45%,45%) scale(2.7); opacity:0;}}
+
+        @media (prefers-reduced-motion: reduce){
+          .g-list-row.g-list-row-button, .g-badge, .g-dot::after, .g-dot-pulse,
+          .g-chart-tip, .g-map-details, .g-kpi, .g-live-stats .g-live-stat{animation:none !important;}
+          .g-trip-actions .g-btn-primary, .g-ocpp-btn, .g-chat-send,
+          .g-gps-prompt-btn.primary, .g-view-mode-btn, .g-ptr-logo.busy{animation:none !important;}
+        }
+
+        /* ---- iOS pull-to-refresh ---- */
+        .g-pull-root{position:relative;}
+        .g-ptr{
+          position:fixed; top:6px; left:50%; z-index:1700; display:flex; flex-direction:column;
+          align-items:center; gap:8px; pointer-events:none; will-change:transform,opacity; opacity:0;
+        }
+        .g-ptr.onscreen{opacity:1;}
+        .g-ptr-logo{
+          width:42px; height:42px; border-radius:15px; display:flex; align-items:center; justify-content:center;
+          color:#0d1520; transform-origin:center;
+          background:linear-gradient(135deg,#4cc9f0,#38bdf8 55%,#8bf0c8);
+          box-shadow:0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.14), 0 0 18px rgba(76,201,240,0.35);
+        }
+        .g-ptr-logo.busy{animation:g-ptr-spin .6s cubic-bezier(.34,1.56,.5,1) 1 both;}
+        .g-ptr-text{
+          font-size:11.5px; color:${C.textDim}; padding:4px 11px; border-radius:99px; white-space:nowrap;
+          background:rgba(8,12,16,0.6); border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(8px);
+        }
+        @keyframes g-ptr-spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+
+        /* ---- press physics round 2: cards, rows, chips ---- */
+        .g-card:active, .g-list-row:active, .g-kpi:active, .g-chip-btn:active, .g-chip:active,
+        .g-smart-chip:active, .g-map-detail-row:active, .g-gw-row:active, .g-table-row:active,
+        .g-tab-row:active, .g-toggle-row:active, .g-driver-row:active, .g-session-row:active,
+        .g-risk-row:active, .g-cost-row:active, .g-gps-row:active, .g-product-card:active,
+        .g-demo-chip:active, .g-vehicle-chip:active, .g-chat-chip:active{animation:g-press .22s cubic-bezier(.34,1.56,.64,1);}
+        @keyframes g-press{0%{transform:scale(1);}35%{transform:scale(.985);}70%{transform:scale(1.008);}100%{transform:scale(1);}}
+
         .g-trip-planner{display:flex; flex-direction:column;}
         .g-trip-fields{
           display:grid; grid-template-columns:1.4fr auto 1.4fr 1fr 1fr; gap:12px; align-items:end; margin-bottom:12px;
@@ -7987,7 +10030,7 @@ export default function GridPulseApp() {
           background:rgba(255,255,255,0.02); border:1px solid ${C.borderSoft}; border-radius:12px; padding:16px;
         }
         .g-trip-stat{display:flex; flex-direction:column; gap:3px; text-align:center;}
-        .g-trip-stat-v{font-size:22px; font-weight:700; color:${C.text}; font-family:var(--mono);}
+        .g-trip-stat-v{font-size:22px; font-weight:700; color:${C.text}; font-family:var(--dot);}
         .g-trip-stat-l{font-size:10.5px; color:${C.textDimmer}; font-family:var(--mono); letter-spacing:.04em; text-transform:uppercase;}
         .g-trip-stops{display:flex; flex-direction:column; border:1px solid ${C.borderSoft}; border-radius:12px; overflow:hidden;}
         .g-trip-stop-head{
@@ -8038,7 +10081,7 @@ export default function GridPulseApp() {
         }
         .g-vehicle-block-label{display:flex; align-items:center; gap:8px; font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:${C.textDimmer}; font-family:var(--mono);}
         .g-vehicle-chip{border:1px solid; border-radius:8px; padding:0 6px; font-size:9px; letter-spacing:.05em; text-transform:uppercase; font-weight:700;}
-        .g-vehicle-value{font-size:24px; font-weight:700; color:${C.text}; letter-spacing:-0.02em; font-family:var(--display), sans-serif;}
+        .g-vehicle-value{font-size:24px; font-weight:700; color:${C.text}; letter-spacing:-0.02em; font-family:var(--dot), sans-serif;}
         .g-vehicle-block-main{font-size:13.5px; font-weight:600; color:${C.text};}
         .g-vehicle-block-sub{font-size:11px; color:${C.textDimmer}; line-height:1.55;}
         .g-progress{height:5px; border-radius:99px; background:rgba(255,255,255,0.08); overflow:hidden; margin-top:6px;}
@@ -8104,7 +10147,7 @@ export default function GridPulseApp() {
           border:1px solid ${C.cyan}; color:${C.cyan}; background:${C.cyanSoft};
           font-size:12px; font-weight:600; transition:background .15s ease, transform .15s ease;
         }
-        .g-btn-sm:hover{background:rgba(79,227,255,0.16); transform:translateY(-1px);}
+        .g-btn-sm:hover{background:var(--g-acc-16); transform:translateY(-1px);}
         .g-btn-sm:disabled{opacity:.4; cursor:not-allowed; transform:none;}
         .g-spin{animation:g-spin 1s linear infinite;}
         @keyframes g-spin{to{transform:rotate(360deg);}}
@@ -8153,7 +10196,7 @@ export default function GridPulseApp() {
         .g-map-detail-row:last-child{border-bottom:none;}
         .g-map-detail-label{font-size:12px; color:${C.textDim};}
         .g-list-row-button{width:100%; border:0; background:none; color:inherit; text-align:left; font:inherit; cursor:pointer;}
-        .g-list-row-button:hover{background:rgba(79,227,255,0.05);}
+        .g-list-row-button:hover{background:var(--g-acc-05);}
 
         /* ---- garage / my car ---- */
         .g-garage-hero{
@@ -8172,7 +10215,7 @@ export default function GridPulseApp() {
           display:flex; flex-direction:column; gap:4px; padding:14px 15px; border-radius:14px;
           border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.025);
         }
-        .g-garage-tile-value{font-size:20px; font-weight:700; color:${C.text}; font-family:var(--mono);}
+        .g-garage-tile-value{font-size:20px; font-weight:700; color:${C.text}; font-family:var(--dot);}
         .g-garage-tile-label{font-size:11px; color:${C.textDim};}
         .g-garage-tile-sub{font-size:11px; color:${C.textDimmer}; font-family:var(--mono);}
         .g-garage-ledger-head{display:flex; align-items:flex-end; justify-content:space-between; gap:14px; margin-bottom:6px; flex-wrap:wrap;}
@@ -8207,6 +10250,7 @@ export default function GridPulseApp() {
           .g-vehicle-fields .g-field-block:last-child{grid-column:auto;}
           .g-map-workspace{grid-template-columns:1fr;}
           .g-map-details{min-height:0;}
+          .g-live-stats{grid-template-columns:1fr 1fr;}
           .g-garage-vitals{grid-template-columns:1fr 1fr;}
           .g-garage-docs{grid-template-columns:1fr;}
           .g-sidebar-car{display:none;}
@@ -8228,7 +10272,7 @@ export default function GridPulseApp() {
         .g-grid-5{grid-template-columns:repeat(5,1fr);}
         @media(max-width:920px){ .g-grid-2,.g-grid-3,.g-grid-4,.g-grid-5{grid-template-columns:1fr;} .g-grid [style*="span 2"]{grid-column:span 1 !important;} }
         .g-sig{display:flex; flex-direction:column; gap:2px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid ${C.border}; border-radius:12px;}
-        .g-sig-v{font-size:20px; font-weight:700; color:${C.text}; font-family:var(--mono);}
+        .g-sig-v{font-size:20px; font-weight:700; color:${C.text}; font-family:var(--dot);}
         .g-sig-sub{font-size:11px; color:${C.textDim}; font-weight:500; font-family:var(--sans);}
         .g-sig-l{font-size:11px; color:${C.textDim};}
         @keyframes gspinkf{to{transform:rotate(360deg)}}
@@ -8236,7 +10280,7 @@ export default function GridPulseApp() {
         .g-weather-loading{display:flex; align-items:center; gap:8px; color:${C.textDimmer}; font-size:12.5px;}
         .g-weather-now{display:flex; align-items:center; gap:14px; margin-bottom:4px;}
         .g-weather-temp-line{display:flex; flex-direction:column; gap:2px;}
-        .g-weather-temp{font-size:34px; font-weight:700; color:${C.text}; line-height:1;}
+        .g-weather-temp{font-size:34px; font-weight:700; color:${C.text}; line-height:1; font-family:var(--dot);}
         .g-weather-feels{font-size:12px; color:${C.textDim};}
         .g-weather-metrics{display:grid; grid-template-columns:repeat(2,1fr); gap:6px 14px; margin-top:12px;}
         .g-weather-metric{display:flex; align-items:center; gap:6px; font-size:11.5px; color:${C.textDimmer};}
@@ -8266,7 +10310,7 @@ export default function GridPulseApp() {
         .g-card-title{display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600; color:${C.text};}
         .g-card-actions{display:flex; align-items:center; gap:8px;}
         .g-card-customizable{position:relative; transition:box-shadow .15s ease, border-color .15s ease;}
-        .g-card-customizable:hover{box-shadow:0 4px 16px rgba(79,227,255,0.1); border-color:${C.cyan};}
+        .g-card-customizable:hover{box-shadow:0 4px 16px var(--g-acc-10); border-color:${C.cyan};}
         .g-card-customize-btn{
           background:none; border:none; color:${C.textDimmer}; padding:4px; border-radius:6px;
           transition:color .15s ease, background .15s ease; cursor:move;
@@ -8286,9 +10330,10 @@ export default function GridPulseApp() {
         .g-kpi{padding:18px;}
         .g-kpi-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
         .g-kpi-label{font-size:12px; color:${C.textDim};}
-        .g-kpi-value{font-family:var(--display); font-size:26px; font-weight:600;}
+        .g-kpi-value{font-family:var(--dot); font-size:26px; font-weight:600;}
         .g-kpi-sub{font-size:11.5px; color:${C.textDimmer}; margin-top:4px;}
-        .g-big-stat{font-family:var(--display); font-size:30px; font-weight:600;}
+        .g-ocpp-status-line{display:flex; align-items:center; gap:10px;}
+        .g-big-stat{font-family:var(--dot); font-size:30px; font-weight:600;}
 
         .g-session-row{display:flex; align-items:center; gap:28px; flex-wrap:wrap; margin-bottom:16px;}
         .g-ring{
@@ -8300,7 +10345,7 @@ export default function GridPulseApp() {
           width:92px; height:92px; border-radius:50%; background:${C.bg2};
           display:flex; flex-direction:column; align-items:center; justify-content:center;
         }
-        .g-ring-value{font-family:var(--display); font-size:22px; font-weight:600;}
+        .g-ring-value{font-family:var(--dot); font-size:22px; font-weight:600;}
         .g-ring-label{font-size:10px; color:${C.textDimmer}; text-align:center; padding:0 8px;}
         .g-session-stats{display:flex; flex-direction:column; gap:10px; flex:1; min-width:180px;}
         .g-stat{display:flex; justify-content:space-between; font-size:13px; border-bottom:1px solid ${C.borderSoft}; padding-bottom:8px;}
@@ -8313,6 +10358,18 @@ export default function GridPulseApp() {
           display:flex; gap:10px; font-size:12.5px; color:${C.textDim}; line-height:1.5;
           background:rgba(255,182,72,0.08); border:1px solid rgba(255,182,72,0.25); border-radius:10px; padding:12px;
         }
+
+        .g-action-feedback{
+          position:relative; z-index:1; align-items:center; margin:2px 0 14px;
+        }
+        .g-action-feedback > span{flex:1; min-width:0;}
+        .g-feedback-dismiss{
+          flex-shrink:0; display:flex; align-items:center; justify-content:center;
+          width:22px; height:22px; padding:0; border-radius:50%;
+          border:1px solid ${C.border}; background:transparent; color:${C.textDimmer}; cursor:pointer;
+          transition:color .15s ease, border-color .15s ease;
+        }
+        .g-feedback-dismiss:hover{color:${C.text}; border-color:${C.textDim};}
 
         .g-list{display:flex; flex-direction:column; gap:2px;}
         .g-list-row{
@@ -8451,7 +10508,7 @@ export default function GridPulseApp() {
         .g-anpr-feed{display:flex; flex-direction:column; gap:6px;}
         .g-anpr-event{
           display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px;
-          background:rgba(79,227,255,0.04); border:1px solid ${C.borderSoft};
+          background:var(--g-acc-04); border:1px solid ${C.borderSoft};
         }
         .g-anpr-plate{font-size:12px; font-weight:600; color:${C.text}; min-width:96px;}
         .g-anpr-meta{font-size:11px; color:${C.textDimmer}; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
@@ -8482,7 +10539,7 @@ export default function GridPulseApp() {
         .g-timeline-rail{display:flex; flex-direction:column; align-items:center;}
         .g-timeline-bullet{
           width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center;
-          border:1px solid rgba(79,227,255,0.35); background:${C.cyanSoft}; flex-shrink:0;
+          border:1px solid var(--g-acc-35); background:${C.cyanSoft}; flex-shrink:0;
         }
         .g-timeline-line{width:1px; flex:1; background:${C.borderSoft}; margin:4px 0;}
         .g-timeline-body{display:flex; flex-direction:column; gap:2px; padding-bottom:16px;}
@@ -8501,14 +10558,14 @@ export default function GridPulseApp() {
 
         /* ---- live gateway page ---- */
         .g-gw-card-head{display:flex; align-items:center; justify-content:space-between; gap:10px;}
-        .g-gw-project{font-size:10.5px; color:${C.cyan}; background:${C.cyanSoft}; border:1px solid rgba(79,227,255,0.25); padding:3px 8px; border-radius:12px;}
+        .g-gw-project{font-size:10.5px; color:${C.cyan}; background:${C.cyanSoft}; border:1px solid var(--g-acc-25); padding:3px 8px; border-radius:12px;}
         .g-gw-status{display:flex; align-items:center; gap:6px; font-size:11px; font-family:var(--mono); color:${C.textDim};}
         .g-gw-card-meta{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;}
         .g-gw-count{font-size:12px; color:${C.cyan};}
         .g-gw-feed{display:flex; flex-direction:column; gap:7px; margin:4px 0 10px;}
         .g-gw-row{
           display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px;
-          background:rgba(79,227,255,0.04); border:1px solid ${C.borderSoft}; flex-wrap:wrap;
+          background:var(--g-acc-04); border:1px solid ${C.borderSoft}; flex-wrap:wrap;
         }
         .g-gw-label{font-size:12px; color:${C.text}; flex:1; min-width:0;}
         .g-gw-val{font-size:11.5px; color:${C.textDim}; font-family:var(--mono);}
@@ -8533,7 +10590,7 @@ export default function GridPulseApp() {
           display:flex; flex-direction:column; gap:4px; padding:16px; border-radius:14px;
           border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.025);
         }
-        .g-roadmap-summary-v{font-size:26px; font-weight:700; color:${C.text};}
+        .g-roadmap-summary-v{font-size:26px; font-weight:700; color:${C.text}; font-family:var(--dot);}
         .g-roadmap-summary-l{font-size:11px; color:${C.textDim}; font-family:var(--mono); letter-spacing:.04em; text-transform:uppercase;}
         .g-roadmap{display:flex; flex-direction:column; gap:10px;}
         .g-roadmap-phase{
@@ -8568,24 +10625,26 @@ export default function GridPulseApp() {
         .g-roadmap-item-tag{font-size:9.5px; letter-spacing:.1em; padding:3px 7px; border-radius:8px; border:1px solid currentColor; opacity:.85; flex-shrink:0;}
         .g-roadmap-note{
           display:flex; gap:10px; margin-top:18px; padding:14px 16px; border-radius:12px;
-          border:1px solid rgba(79,227,255,0.2); background:${C.cyanSoft}; font-size:12.5px; color:${C.text}; line-height:1.55;
+          border:1px solid var(--g-acc-20); background:${C.cyanSoft}; font-size:12.5px; color:${C.text}; line-height:1.55;
         }
         @media(max-width:640px){ .g-roadmap-summary{grid-template-columns:1fr;} }
 
-        /* ---- chatbot assistant ---- */
+        /* ---- chatbot assistant (Gemini-style) ---- */
         .g-chat-fab{
           position:fixed; right:22px; bottom:22px; z-index:1500;
-          width:54px; height:54px; border-radius:50%; border:none; cursor:pointer;
-          background:${C.cyan}; color:#001217; display:flex; align-items:center; justify-content:center;
-          box-shadow:0 8px 28px rgba(79,227,255,0.35); transition:transform .15s ease, background .15s ease;
+          width:56px; height:56px; border-radius:50%; border:none; cursor:pointer;
+          background:${SIRI_AURORA};
+          color:#fff; display:flex; align-items:center; justify-content:center;
+          box-shadow:0 10px 30px rgba(120,110,220,0.45);
+          transition:transform .15s ease, box-shadow .15s ease;
         }
-        .g-chat-fab:hover{transform:translateY(-2px); background:#6dea; }
+        .g-chat-fab:hover{transform:translateY(-2px) scale(1.04); box-shadow:0 14px 34px rgba(120,110,220,0.55);}
         .g-chat{
           position:fixed; right:22px; bottom:88px; z-index:1500;
-          width:min(380px, calc(100vw - 32px)); height:min(540px, calc(100vh - 130px));
+          width:min(400px, calc(100vw - 32px)); height:min(580px, calc(100vh - 130px));
           display:flex; flex-direction:column; overflow:hidden;
-          background:${C.panelSolid}; border:1px solid ${C.border}; border-radius:18px;
-          box-shadow:0 20px 60px rgba(0,0,0,0.5); backdrop-filter:blur(18px);
+          background:${C.panelSolid}; border:1px solid ${C.border}; border-radius:22px;
+          box-shadow:0 24px 70px rgba(0,0,0,0.5); backdrop-filter:blur(18px);
           animation:g-chat-in .2s ease;
         }
         @keyframes g-chat-in{from{opacity:0; transform:translateY(12px);}to{opacity:1; transform:translateY(0);}}
@@ -8594,11 +10653,13 @@ export default function GridPulseApp() {
           border-bottom:1px solid ${C.borderSoft};
         }
         .g-chat-avatar{
-          width:32px; height:32px; border-radius:10px; display:flex; align-items:center; justify-content:center;
-          background:${C.cyan}; color:#001217; flex-shrink:0;
+          width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+          background:${SIRI_AURORA};
+          color:#fff; flex-shrink:0; box-shadow:0 6px 18px rgba(120,110,220,0.4);
         }
         .g-chat-head-main{flex:1; min-width:0;}
-        .g-chat-title{font-size:13.5px; font-weight:600; color:${C.text};}
+        .g-chat-title{font-size:14.5px; font-weight:700; color:${C.text};}
+        .g-chat-head-sub{font-size:11px; color:${C.textDimmer}; font-weight:600; letter-spacing:.06em;}
         .g-chat-sub{display:flex; align-items:center; gap:5px; font-size:11px; color:${C.textDim};}
         .g-chat-live{width:7px; height:7px; border-radius:50%; background:${C.green}; box-shadow:0 0 8px ${C.green};}
         .g-chat-live-ai{background:${C.cyan}; box-shadow:0 0 8px ${C.cyan};}
@@ -8611,6 +10672,16 @@ export default function GridPulseApp() {
           display:flex; transition:background .15s ease, color .15s ease;
         }
         .g-chat-gear:hover{background:rgba(255,255,255,0.06); color:${C.text};}
+        .g-chat-retry{
+          display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:700; letter-spacing:.03em;
+          color:#f2b950; background:rgba(242,185,80,0.12); border:1px solid rgba(242,185,80,0.35);
+          padding:1px 7px; border-radius:999px; cursor:pointer; white-space:nowrap; transition:opacity .15s ease;
+        }
+        .g-chat-retry:hover{opacity:.85;}
+        .g-chat-ai-info{
+          font-size:12px; color:${C.textDim}; background:rgba(255,255,255,0.03); border:1px solid ${C.borderSoft};
+          border-radius:8px; padding:10px 12px; line-height:1.55;
+        }
         .g-chat-note{padding:7px 14px; font-size:11px; color:${C.textDimmer}; background:rgba(255,255,255,0.03); border-bottom:1px solid ${C.borderSoft};}
         .g-chat-aiconfig{
           padding:12px 14px; border-bottom:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.02);
@@ -8624,7 +10695,7 @@ export default function GridPulseApp() {
         .g-chat-ai-input:focus{border-color:${C.cyan};}
         .g-chat-ai-actions{display:flex; align-items:center; gap:10px; margin-top:4px;}
         .g-chat-ai-save{
-          background:${C.cyan}; color:#001217; border:none; border-radius:8px; padding:7px 14px;
+          background:${C.cyan}; color:var(--g-on-acc); border:none; border-radius:8px; padding:7px 14px;
           font-size:12px; font-weight:600; cursor:pointer; transition:opacity .15s ease;
         }
         .g-chat-ai-save:hover{opacity:.85;}
@@ -8634,41 +10705,257 @@ export default function GridPulseApp() {
           display:flex; transition:background .15s ease, color .15s ease;
         }
         .g-chat-close:hover{background:rgba(255,255,255,0.06); color:${C.text};}
-        .g-chat-suggestions{display:flex; flex-wrap:wrap; gap:6px; padding:10px 14px; border-bottom:1px solid ${C.borderSoft};}
-        .g-chat-suggestion{
-          padding:6px 11px; border-radius:16px; border:1px solid ${C.border};
-          background:${C.cyanSoft}; color:${C.cyan}; font-size:11.5px; transition:border-color .15s ease, background .15s ease;
+        .g-chat-hero{
+          flex:1; min-height:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+          gap:10px; padding:26px 22px; text-align:center; overflow-y:auto;
         }
-        .g-chat-suggestion:hover{border-color:${C.cyan}; background:rgba(79,227,255,0.2);}
-        .g-chat-list{flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px;}
-        .g-chat-msg{display:flex; align-items:flex-end; gap:8px; max-width:88%;}
+        .g-chat-hero-orb{
+          width:58px; height:58px; border-radius:50%; position:relative;
+          background:${SIRI_AURORA};
+          display:flex; align-items:center; justify-content:center; color:#fff;
+          box-shadow:0 12px 34px rgba(142,124,240,0.45), 0 0 0 6px rgba(255,255,255,0.03);
+          animation:g-chat-pulse 3s ease-in-out infinite;
+        }
+        .g-chat-hero-orb::after{
+          content:''; position:absolute; inset:-16px; border-radius:50%; z-index:-1;
+          background:conic-gradient(from 0deg, #8E7CF0, #5AC8FA, #34C7C2, #FF6EA6, #8E7CF0);
+          filter:blur(20px); opacity:.5;
+          animation:g-chat-spin 8s linear infinite;
+        }
+        @keyframes g-chat-spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+        @keyframes g-chat-pulse{0%,100%{transform:scale(1);}50%{transform:scale(1.05);}}
+        .g-chat-hero-title{font-size:19px; font-weight:700; color:${C.text};}
+        .g-chat-grad{
+          background:linear-gradient(90deg, #8E7CF0, #5AC8FA 45%, #34C7C2 72%, #FF6EA6);
+          -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+        }
+        .g-chat-hero-sub{font-size:12.5px; color:${C.textDim}; max-width:290px; line-height:1.55;}
+        .g-chat-hero-chips{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:16px; width:100%; max-width:310px;}
+        .g-chat-chip{
+          display:flex; align-items:center; gap:9px; padding:12px 13px; border-radius:14px;
+          background:rgba(255,255,255,0.05); border:1px solid ${C.borderSoft}; color:${C.text};
+          font-size:12.2px; cursor:pointer; text-align:left; transition:border-color .15s ease, background .15s ease;
+        }
+        .g-chat-chip:hover{border-color:${SIRI_VIOLET}; background:var(--g-acc-06);}
+        .g-chat-list{flex:1; min-height:0; overflow-y:auto; padding:18px 16px; display:flex; flex-direction:column; gap:14px;}
+        .g-chat-msg{display:flex; align-items:flex-end; gap:9px; max-width:94%;}
         .g-chat-msg-bot{align-self:flex-start;}
-        .g-chat-msg-user{align-self:flex-end; flex-direction:row-reverse;}
+        .g-chat-msg-user{align-self:flex-end;}
         .g-chat-msg-avatar{
-          width:22px; height:22px; border-radius:7px; display:flex; align-items:center; justify-content:center;
-          background:${C.cyanSoft}; color:${C.cyan}; flex-shrink:0;
+          width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+          background:${SIRI_AURORA};
+          color:#fff; flex-shrink:0; box-shadow:0 4px 12px rgba(142,124,240,0.4);
         }
+        .g-chat-usertext{
+          font-size:14px; color:${C.text}; line-height:1.5; padding:2px 2px 0;
+        }
+        .g-chat-reply{display:flex; flex-direction:column; gap:8px; min-width:0;}
         .g-chat-bubble{
-          padding:10px 13px; border-radius:14px; font-size:12.8px; line-height:1.5;
-          border:1px solid ${C.borderSoft}; background:rgba(255,255,255,0.03); color:${C.text};
+          padding:10px 14px; border-radius:8px 16px 16px 16px; font-size:13px; line-height:1.55;
+          background:rgba(255,255,255,0.06); color:${C.text}; white-space:pre-wrap; word-break:break-word;
         }
-        .g-chat-msg-user .g-chat-bubble{background:${C.cyan}; color:#001217; border-color:${C.cyan};}
-        .g-chat-typing{display:flex; gap:4px; align-items:center; padding:14px;}
+        .g-chat-actions{display:flex; flex-wrap:wrap; gap:6px;}
+        .g-chat-action{
+          display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:999px;
+          background:linear-gradient(135deg, rgba(142,124,240,0.18), rgba(90,200,250,0.18));
+          border:1px solid rgba(142,124,240,0.45); color:${C.text}; font-size:12px; cursor:pointer;
+          transition:transform .12s ease, box-shadow .12s ease;
+        }
+        .g-chat-action:hover{transform:translateY(-1px); box-shadow:0 4px 14px rgba(142,124,240,0.3);}
+        .g-chat-followups{display:flex; flex-wrap:wrap; gap:6px;}
+        .g-chat-chip-inline{
+          padding:5px 11px; border-radius:999px; background:rgba(255,255,255,0.05);
+          border:1px solid ${C.borderSoft}; color:${C.textDim}; font-size:11.5px; cursor:pointer; transition:color .15s ease, border-color .15s ease;
+        }
+        .g-chat-chip-inline:hover{color:${SIRI_VIOLET}; border-color:${SIRI_VIOLET};}
+        .g-chat-typing{display:flex; gap:4px; align-items:center; padding:12px 14px;}
         .g-chat-typing span{width:6px; height:6px; border-radius:50%; background:${C.textDimmer}; animation:g-blink 1.2s infinite;}
         .g-chat-typing span:nth-child(2){animation-delay:.15s;}
         .g-chat-typing span:nth-child(3){animation-delay:.3s;}
         .g-chat-input{
-          display:flex; gap:8px; padding:12px 14px; border-top:1px solid ${C.borderSoft};
+          display:flex; align-items:center; gap:8px; padding:12px 14px; border-top:1px solid ${C.borderSoft};
         }
+        .g-chat-input-ic{color:${C.textDimmer}; display:flex; margin-left:2px;}
         .g-chat-input input{
-          flex:1; min-width:0; background:rgba(255,255,255,0.04); border:1px solid ${C.border};
-          border-radius:10px; padding:10px 12px; color:${C.text}; font-size:13px; outline:none; font-family:inherit;
+          flex:1; min-width:0; background:rgba(255,255,255,0.05); border:1px solid ${C.border};
+          border-radius:22px; padding:11px 15px; color:${C.text}; font-size:13px; outline:none; font-family:inherit;
         }
         .g-chat-input input::placeholder{color:${C.textDimmer};}
-        .g-chat-input input:focus{border-color:${C.cyan};}
+        .g-chat-input input:focus{border-color:rgba(142,124,240,0.6); box-shadow:0 0 0 3px rgba(142,124,240,0.16);}
         .g-chat-send{
-          width:40px; height:40px; border-radius:10px; border:none; display:flex; align-items:center; justify-content:center;
-          background:${C.cyan}; color:#001217; transition:opacity .15s ease;
+          width:38px; height:38px; border-radius:50%; border:none; display:flex; align-items:center; justify-content:center;
+          background:${SIRI_AURORA}; color:#fff;
+          transition:opacity .15s ease, transform .15s ease; flex-shrink:0;
+        }
+        .g-chat-send:hover{opacity:.9; transform:scale(1.05);}
+        .g-chat-send:disabled{opacity:.4; transform:none; cursor:default;}
+
+        /* ---- iOS liquid glass (applied in both modes) ---- */
+        .g-root .g-card,
+        .g-root .g-login-card,
+        .g-root .g-modal,
+        .g-root .g-topbar,
+        .g-root .g-notification-dropdown,
+        .g-root .g-chat,
+        .g-root .g-insight,
+        .g-root .g-cost-break,
+        .g-root .g-live-integrations,
+        .g-root .g-map-details,
+        .g-root .g-search-results{
+          background:${minimalMode ? `rgba(255,255,255,${glassAlphaLight})` : `rgba(255,255,255,${glassAlphaDark})`};
+          backdrop-filter: blur(${glassBlur}px) saturate(180%);
+          -webkit-backdrop-filter: blur(${glassBlur}px) saturate(180%);
+          border-color:${C.borderSoft};
+          box-shadow:
+            inset 0 1px 0 rgba(255,255,255,0.10),
+            var(--g-shadow);
+        }
+        /* Light mode = crisp, OPAQUE iOS cards — hairline borders, tiny shadows, no heavy wash. */
+        .g-root.g-root-minimal .g-card,
+        .g-root.g-root-minimal .g-login-card,
+        .g-root.g-root-minimal .g-modal,
+        .g-root.g-root-minimal .g-topbar,
+        .g-root.g-root-minimal .g-notification-dropdown,
+        .g-root.g-root-minimal .g-chat,
+        .g-root.g-root-minimal .g-insight,
+        .g-root.g-root-minimal .g-cost-break,
+        .g-root.g-root-minimal .g-live-integrations,
+        .g-root.g-root-minimal .g-map-details,
+        .g-root.g-root-minimal .g-bill-estimator{
+          background: rgba(255,255,255,0.95);
+          backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
+          border:1px solid rgba(0,0,0,0.08);
+          box-shadow: 0 1px 2px rgba(20,25,35,0.04), 0 10px 28px rgba(20,25,35,0.06);
+        }
+        .g-root.g-root-minimal .g-sidebar{
+          box-shadow: 1px 0 0 rgba(0,0,0,0.05), 0 1px 2px rgba(20,25,35,0.04);
+        }
+        .g-root .g-card{border-radius:22px;}
+        .g-root .g-login-card{border-radius:30px;}
+        .g-root .g-modal{border-radius:24px;}
+        .g-root .g-sidebar,
+        .g-root .g-topbar,
+        .g-root .g-notification-dropdown,
+        .g-root .g-chat,
+        .g-root .g-insight{border-radius:20px;}
+        .g-root .g-cost-break,
+        .g-root .g-live-integrations,
+        .g-root .g-map-details,
+        .g-root .g-live-stat,
+        .g-root .g-search-results{border-radius:18px;}
+        .g-root .g-bill-estimator{border-radius:20px;}
+        .g-root .g-bill-estimator-total,
+        .g-root .g-kpi-value,
+        .g-root .g-big-stat,
+        .g-root .g-ring-value,
+        .g-root .g-vehicle-value,
+        .g-root .g-weather-temp,
+        .g-root .g-trip-stat-v,
+        .g-root .g-sig-v,
+        .g-root .g-garage-tile-value,
+        .g-root .g-roadmap-summary-v,
+        .g-root .g-schedule-value{
+          font-family:var(--dot); font-weight:700; letter-spacing:-0.02em;
+        }
+        .g-root .g-btn-primary,
+        .g-root .g-insight-action-primary,
+        .g-root .g-chat-send{border-radius:12px;}
+        .g-root .g-chip,
+        .g-root .g-bill-estimator-badge,
+        .g-root .g-stack-chip,
+        .g-root .g-demo-chip{border-radius:999px;}
+        .g-root .g-input,
+        .g-root .g-field-block input,
+        .g-root .g-field-block select,
+        .g-root .g-trip-fields input[type=text],
+        .g-root .g-locsearch-input,
+        .g-root .g-chat-input input,
+        .g-root .g-chat-ai-input,
+        .g-root .g-search-input{border-radius:12px;}
+        .g-root.g-root-minimal .g-chat-input input,
+        .g-root.g-root-minimal .g-chat-ai-input,
+        .g-root.g-root-minimal .g-field-block input,
+        .g-root.g-root-minimal .g-field-block select,
+        .g-root.g-root-minimal .g-trip-fields input[type=text],
+        .g-root.g-root-minimal .g-locsearch-input,
+        .g-root.g-root-minimal .g-bill-customizer input{
+          background: rgba(0,0,0,0.05);
+        }
+        @media(max-width:900px){
+          .g-root .g-sidebar{border-radius:0 20px 20px 0;}
+        }
+        .g-root ::-webkit-scrollbar{width:10px; height:10px;}
+        .g-root ::-webkit-scrollbar-thumb{background:${C.border}; border-radius:8px; border:3px solid transparent; background-clip:padding-box;}
+        .g-root ::-webkit-scrollbar-track{background:transparent;}
+
+        /* ---- iOS-style GPS enable alert ---- */
+        .g-gps-overlay{
+          position:fixed; inset:0; z-index:2000; display:flex; align-items:center; justify-content:center;
+          padding:24px; pointer-events:none;
+          background:rgba(0,0,0,0.5),
+            radial-gradient(700px 500px at 50% 20%, var(--g-glow-a), transparent 60%);
+          backdrop-filter: blur(18px) saturate(140%);
+          -webkit-backdrop-filter: blur(18px) saturate(140%);
+          animation:g-gps-fade .3s ease;
+        }
+        @keyframes g-gps-fade{from{opacity:0;} to{opacity:1;}}
+        .g-gps-prompt{
+          width:min(360px, 100%); text-align:center; padding:28px 24px 18px;
+          border-radius:22px; background:${C.panelSolid};
+          border:1px solid ${C.borderSoft};
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.10), 0 30px 80px rgba(0,0,0,0.5);
+          animation:g-gps-pop .38s cubic-bezier(.22,1,.36,1);
+          pointer-events:auto;
+        }
+        @keyframes g-gps-pop{from{opacity:0; transform:translateY(14px) scale(.96);} to{opacity:1; transform:translateY(0) scale(1);}}
+        .g-gps-prompt-icon{
+          width:58px; height:58px; margin:0 auto 14px; border-radius:50%;
+          display:flex; align-items:center; justify-content:center;
+          background:${C.cyanSoft};
+        }
+        .g-gps-prompt h3{
+          font-family:var(--display); font-size:17px; font-weight:700; color:${C.text}; margin:0 0 8px;
+        }
+        .g-gps-prompt p{font-size:13px; line-height:1.55; color:${C.textDim}; margin:0 0 20px;}
+        .g-gps-prompt-actions{display:flex; gap:10px;}
+        .g-gps-prompt-btn{
+          flex:1; padding:11px 0; border-radius:12px; font-size:14px; font-weight:600;
+          font-family:var(--display); transition:opacity .15s ease, transform .1s ease;
+        }
+        .g-gps-prompt-btn:active{transform:scale(.97);}
+        .g-gps-prompt-btn.ghost{background:${C.grit}; color:${C.text}; border:1px solid ${C.border};}
+        .g-gps-prompt-btn.primary{background:${C.cyan}; color:#fff; border:1px solid transparent; display:inline-flex; align-items:center; justify-content:center; gap:6px;}
+        .g-gps-prompt-btn.primary:hover{opacity:.9;}
+
+        /* ---- settings: theme segmented + liquid-glass slider ---- */
+        .g-seg{display:flex; gap:4px; padding:4px; background:rgba(128,128,128,0.14); border-radius:12px;}
+        .g-seg-btn{
+          flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:7px 0;
+          border:none; background:none; border-radius:9px; color:${C.textDim}; font-size:12.5px; font-weight:600;
+          font-family:var(--display); transition:background .15s ease, color .15s ease;
+        }
+        .g-seg-btn:hover{color:${C.text};}
+        .g-seg-btn.active{
+          background:${C.panelSolid}; color:${C.text};
+          box-shadow:0 2px 8px rgba(0,0,0,0.12), inset 0 0 0 1px ${C.borderSoft};
+        }
+        .g-glass-slider{
+          -webkit-appearance:none; appearance:none; width:100%; height:22px; position:relative;
+          outline:none; border:none; padding:0; cursor:pointer; background:transparent;
+        }
+        .g-glass-slider::-webkit-slider-runnable-track{
+          height:7px; border-radius:99px; background:rgba(128,128,128,0.28);
+        }
+        .g-glass-slider::-webkit-slider-thumb{
+          -webkit-appearance:none; appearance:none; width:22px; height:22px; margin-top:-7.5px;
+          border-radius:50%; background:#fff; border:none; cursor:grab;
+          box-shadow:0 2px 8px rgba(0,0,0,0.3);
+        }
+        .g-glass-slider::-moz-range-track{height:7px; border-radius:99px; background:rgba(128,128,128,0.28);}
+        .g-glass-slider::-moz-range-thumb{
+          width:22px; height:22px; border-radius:50%; background:#fff; border:none;
+          box-shadow:0 2px 8px rgba(0,0,0,0.3);
         }
         .g-chat-send:disabled{opacity:.4; cursor:not-allowed;}
       `}</style>
@@ -8694,8 +10981,8 @@ export default function GridPulseApp() {
             onToggleMinimal={() => setMinimalMode((prev) => !prev)}
           />
           {session.role === "ev"
-            ? <DriverDashboard name={session.name} preferences={preferences} setPreferences={setPreferences} vehicleProfile={session.vehicle} />
-            : <OwnerDashboard name={session.name} preferences={preferences} setPreferences={setPreferences} />}
+            ? <DriverDashboard name={session.name} preferences={preferences} setPreferences={setPreferences} vehicleProfile={session.vehicle} minimalMode={minimalMode} onToggleMinimal={() => setMinimalMode((v) => !v)} />
+            : <OwnerDashboard name={session.name} preferences={preferences} setPreferences={setPreferences} minimalMode={minimalMode} onToggleMinimal={() => setMinimalMode((v) => !v)} />}
           <ChatbotAssistant role={session.role === "ev" ? "driver" : "owner"} />
           <HelpModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} />
         </>

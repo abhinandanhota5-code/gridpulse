@@ -166,9 +166,9 @@ const sessionThroughput = [
 ];
 
 const anomalies = [
-  { charger: "CH-031", severity: "high", detail: "Meter draw 14% below expected — possible bypass", time: "2h ago" },
-  { charger: "CH-008", severity: "medium", detail: "Charging cycle irregular vs. session profile", time: "6h ago" },
-  { charger: "CH-027", severity: "low", detail: "Temperature drift outside normal band", time: "1d ago" },
+  { charger: "CH-031", severity: "high", detail: "Meter draw 14% below expected — possible bypass", time: "2h ago", type: "Meter bypass", site: "CMC Charging Bay", recommendation: "Audit the meter enclosure and compare kWh counters against feeder draw before the next session.", status: "open" },
+  { charger: "CH-008", severity: "medium", detail: "Charging cycle irregular vs. session profile", time: "6h ago", type: "Cycle profile", site: "Gandhi Nagar Lot", recommendation: "Re-start the charger and capture a full MeterValues curve for one session to confirm.", status: "open" },
+  { charger: "CH-027", severity: "low", detail: "Temperature drift outside normal band", time: "1d ago", type: "Thermal drift", site: "Ranipet Depot", recommendation: "Schedule a thermal sensor check; drifting readings often precede connector wear.", status: "open" },
 ];
 
 const alertTrend = [
@@ -177,10 +177,10 @@ const alertTrend = [
 ];
 
 const maintenanceQueue = [
-  { charger: "CH-031", task: "Connector inspection", due: "Overdue" },
-  { charger: "CH-008", task: "Firmware update", due: "In 2 days" },
-  { charger: "CH-027", task: "Thermal sensor check", due: "In 5 days" },
-  { charger: "CH-019", task: "Routine service", due: "In 12 days" },
+  { charger: "CH-031", task: "Connector inspection", due: "Overdue", priority: "high", site: "CMC Charging Bay", part: "Type-2 connector head", lastService: "8 weeks ago", estDowntime: "45 min", description: "Intermittent de-rating at high power — inspection for contact wear and torque." },
+  { charger: "CH-008", task: "Firmware update", due: "In 2 days", priority: "medium", site: "Gandhi Nagar Lot", part: "Firmware v4.2.1", lastService: "3 days ago", estDowntime: "20 min", description: "Addresses a MeterValues rounding bug flagged by the theft correlator." },
+  { charger: "CH-027", task: "Thermal sensor check", due: "In 5 days", priority: "medium", site: "Ranipet Depot", part: "NTC temperature sensor", lastService: "Never", estDowntime: "30 min", description: "Sensor drift outside normal band; verify calibration and probe seating." },
+  { charger: "CH-019", task: "Routine service", due: "In 12 days", priority: "low", site: "Vellore Depot", part: "Contact kit + air filter", lastService: "6 months ago", estDowntime: "60 min", description: "Scheduled preventive service — contactor inspection and filter swap." },
 ];
 
 const energyTrend = [
@@ -246,10 +246,10 @@ const weatherDemandCorrelation = [
 
 /* ---- energy theft ---- */
 const theftFlags = [
-  { charger: "CH-031", site: "CMC Charging Bay", expected: "46 kW", actual: "12 kW", deviation: "-74%", confidence: "high", detected: "2h ago", type: "Meter bypass" },
-  { charger: "CH-008", site: "Gandhi Nagar Lot", expected: "30 kW", actual: "22 kW", deviation: "-27%", confidence: "medium", detected: "1d ago", type: "Unmetered session" },
-  { charger: "CH-019", site: "Ranipet Depot", expected: "0 kW (idle)", actual: "9 kW", deviation: "+9 kW", confidence: "medium", detected: "3d ago", type: "Phantom draw" },
-  { charger: "CH-002", site: "Katpadi Junction", expected: "60 kW", actual: "51 kW", deviation: "-15%", confidence: "low", detected: "5d ago", type: "Tariff mismatch" },
+  { charger: "CH-031", site: "CMC Charging Bay", expected: "46 kW", actual: "12 kW", deviation: "-74%", confidence: "high", detected: "2h ago", type: "Meter bypass", stage: "Awaiting review", impact: "Est. 34 kW unaccounted during evening peak.", recovery: "Inspected meter, re-seat seals, compare feeders" },
+  { charger: "CH-008", site: "Gandhi Nagar Lot", expected: "30 kW", actual: "22 kW", deviation: "-27%", confidence: "medium", detected: "1d ago", type: "Unmetered session", stage: "Under review", impact: "Session ended without a matched start record.", recovery: "Match session start via ANPR, then reconcile bill" },
+  { charger: "CH-019", site: "Ranipet Depot", expected: "0 kW (idle)", actual: "9 kW", deviation: "+9 kW", confidence: "medium", detected: "3d ago", type: "Phantom draw", stage: "Under review", impact: "Idle draw while no OCPP transaction was active.", recovery: "Inspect branch breaker and load-side wiring" },
+  { charger: "CH-002", site: "Katpadi Junction", expected: "60 kW", actual: "51 kW", deviation: "-15%", confidence: "low", detected: "5d ago", type: "Tariff mismatch", stage: "Awaiting review", impact: "Session billing applied at off-peak rate all day.", recovery: "Audit tariff table mappings per connector" },
 ];
 
 const theftByType = [

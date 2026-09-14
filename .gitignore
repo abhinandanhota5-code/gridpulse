@@ -1,6 +1,10 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
+.gridpulse/
+*.log
 .DS_Store
 desktop/node_modules/
 desktop/release/

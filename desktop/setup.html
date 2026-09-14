@@ -73,6 +73,13 @@
         <div class="v" id="netV">Realtime temperature, forecast and the USD&rarr;INR rate are fetched live. Offline, GRIDPULSE keeps working with stored norms.</div>
       </div>
     </div>
+    <div class="row">
+      <div class="dot" id="aiDot"></div>
+      <div style="flex:1">
+        <div class="k">Pulse AI assistant <span class="tag" id="aiTag">checking</span></div>
+        <div class="v" id="aiV">GRIDPULSE runs its assistant on a private, local AI engine on this computer &mdash; no API key or cloud account needed. The first launch downloads it once in the background.</div>
+      </div>
+    </div>
   </div>
 
   <div class="card" id="nextCard" style="display:none">
@@ -100,8 +107,8 @@
 
   async function check() {
     $("openBtn").disabled = true;
-    for (const id of ["rtDot", "gwDot", "clipDot", "netDot"]) $(id).className = "dot pulse";
-    for (const t of ["rtTag", "gwTag", "clipTag", "netTag"]) $(t).textContent = "checking";
+    for (const id of ["rtDot", "gwDot", "clipDot", "netDot", "aiDot"]) $(id).className = "dot pulse";
+    for (const t of ["rtTag", "gwTag", "clipTag", "netTag", "aiTag"]) $(t).textContent = "checking";
 
     let r;
     try { r = await window.gridpulse.health(); }
@@ -147,10 +154,31 @@
       ? "Realtime Open-Meteo weather and the live USD\u2192INR rate are reachable."
       : "You appear to be offline. GRIDPULSE keeps working using stored tariff and weather norms; connect to the internet to get live temperature, forecasts and the exchange rate.";
 
+    let aist;
+    try { aist = await window.gridpulse.aiStatus(); }
+    catch (_) { aist = null; }
+    if (aist && aist.provider === "cloud") {
+      tagged($("aiDot"), $("aiTag"), "ok", "cloud");
+      $("aiV").textContent = "Pulse AI is configured for your cloud provider (legacy mode). Local setup is skipped.";
+    } else if (aist && aist.ready) {
+      tagged($("aiDot"), $("aiTag"), "ok", "ready");
+      $("aiV").textContent = "Pulse AI is up on the local engine (" + (aist.model || "llama3:latest") + "). No API key, terminal commands or configuration needed.";
+    } else if (aist && aist.phase === "failed") {
+      tagged($("aiDot"), $("aiTag"), "bad", "retry");
+      $("aiV").textContent = (aist.message || "Pulse AI setup was interrupted.") + " Open the assistant (headphone icon, bottom-right) and press Retry \u2014 it resumes where it stopped.";
+    } else if (aist) {
+      tagged($("aiDot"), $("aiTag"), "warn", aist.stage || "starting");
+      $("aiV").textContent = "Pulse AI is provisioning in the background" + (aist.percent != null ? " \u2014 " + Math.round(aist.percent) + "%" : "") + ". Everything else works while this finishes. It downloads once, then runs fully offline.";
+    } else {
+      tagged($("aiDot"), $("aiTag"), "warn", "unknown");
+      $("aiV").textContent = "Couldn't read the local AI status right now. It self-heals in the background; open the assistant later to see progress.";
+    }
+
     const problems = [];
     if (!r.ok) problems.push("gateway not running \u2014 relaunch the app");
     if (feeds.length && !good.length) problems.push("live integrations still starting \u2014 wait a few seconds and re-run checks");
     if (!online) problems.push("you're offline \u2014 live weather & exchange rate are paused (app still fully usable)");
+    if (aist && aist.phase === "failed") problems.push("Pulse AI setup needs a Retry \u2014 open the assistant settings");
     if (problems.length) {
       $("nextTitle").textContent = "Small things to resolve";
       $("nextV").textContent = problems.map((p) => "\u2022 " + p).join("\n");

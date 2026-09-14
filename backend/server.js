@@ -1,8 +1,13 @@
+/* Load backend/.env first so module-level config (chat.js PRISM vars,
+   CORS, MODBUS, ports, tokens) is set before anything reads it. */
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+const { spawn } = require("child_process");
 
 const { live } = require("./live");
 const { attach: attachOcpp } = require("./ocpp");
@@ -12,7 +17,10 @@ const { registerOpenAdr } = require("./openadr");
 const { buildDriverData, buildOwnerData } = require("./merge");
 const fx = require("./fx");
 const { fetchWeather } = require("./weather");
+const { geocode } = require("./geocode");
+const { fetchRoute } = require("./osrm");
 const chat = require("./chat");
+const ai = require("./ollama");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -31,6 +39,39 @@ app.use(
   })
 );
 app.use(express.json({ limit: "1mb" }));
+
+/* ---- PRISMtap: backend request tracing (fire-and-forget, sampled) ----
+   Traces the REST/API handlers as PrismTrace "spans" alongside the deeper
+   assistant traces emitted in chat.js. Enabled only when
+   PRISMTRACE_PROJECT_ID + PRISMTRACE_API_KEY are set; never blocks the
+   request, and never touches streams or the already-traced chat route.
+   ---------------------------------------------------------------- */
+const { emitTrace: emitPrismSpan } = chat;
+let prismRequestCount = 0;
+app.use("/api", (req, res, next) => {
+  if (req.path === "/stream" || req.path === "/chat" || req.path === "/chat/config") return next();
+  const t0 = Date.now();
+  const started = ++prismRequestCount;
+  res.on("finish", () => {
+    const code = res.statusCode;
+    const traceable = req.method === "POST" || code >= 400 || started % 3 === 0;
+    if (!traceable) return;
+    emitPrismSpan({
+      inputMessages: [{ role: "user", content: `${req.method} ${req.path}` }],
+      outputMessage: `HTTP ${code}`,
+      model: "gridpulse-api",
+      latencyMs: Date.now() - t0,
+      sessionId: undefined,
+      metadata: {
+        route: `${req.baseUrl}${req.path}`,
+        method: req.method,
+        status: code,
+        source: "gridpulse-backend",
+      },
+    });
+  });
+  next();
+});
 
 /* Capture the raw XML/JSON body for the OpenADR endpoints. */
 app.use("/openadr", (req, res, next) => {
@@ -80,6 +121,32 @@ app.get("/api/weather", async (req, res) => {
   res.json(await fetchWeather(lat, lon));
 });
 
+/* Place-name search for the charger locator (Nominatim proxy, cached).
+   Falls back to an empty result set when upstream is unreachable. */
+app.get("/api/geocode", async (req, res) => {
+  const q = String(req.query.q || "").trim();
+  if (!q) return res.status(400).json({ error: "q (place query) is required" });
+  res.json(await geocode(q));
+});
+
+/* Road route between two coordinates (OSRM proxy, cached). Returns
+   distance, drive time and a polyline so the map can draw the route. */
+app.get("/api/route", async (req, res) => {
+  const { from, to } = req.query;
+  const parse = (v) => {
+    const parts = String(v || "").split(",").map(Number);
+    return parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])
+      ? parts
+      : null;
+  };
+  const f = parse(from);
+  const t = parse(to);
+  if (!f || !t) {
+    return res.status(400).json({ error: "from and to are required as lat,lng pairs" });
+  }
+  res.json(await fetchRoute(f[0], f[1], t[0], t[1]));
+});
+
 app.get("/api/stream", (req, res) => {
   live.addStream(res);
 });
@@ -102,17 +169,42 @@ app.post("/api/auth/login", (req, res) => {
   res.json({ name, role: safeRole });
 });
 
-/* ---- assistant chat (LLM-backed, with local fallback) ---- */
+/* ---- assistant chat (local Ollama by default, cloud fallback) ---- */
 app.get("/api/chat/config", (_req, res) => {
+  const s = ai.status();
+  const mode = chat.providerMode();
+  const aiOn = mode === "ollama" ? s.ready : chat.configured() || s.ready;
   res.json({
-    ai: chat.configured(),
-    model: chat.effectiveModel(),
+    ai: aiOn,
+    provider: mode,
+    model: s.ready ? s.model : chat.effectiveModel(),
+    aiReady: s.ready,
+    aiPhase: s.phase,
+    aiStage: s.stage,
+    aiPercent: s.percent,
+    aiMessage: s.message,
+    aiError: s.error,
     prism: chat.prismEnabled(),
     prismHost: chat.prismHost(),
-    note: chat.configured()
-      ? "AI assistant connected via server config."
-      : "No AI provider key set — chat runs in offline knowledge mode. Add a key in the assistant settings or set GRIDPULSE_AI_API_KEY."
+    note: aiOn
+      ? `AI assistant online (${mode === "ollama" ? "local " + s.model : "cloud"}).`
+      : mode === "ollama"
+        ? "Pulse's local AI is setting up — everything else still works. Ask again in a moment."
+        : "No AI provider key set — chat runs in offline knowledge mode. Add a key in the assistant settings or set GRIDPULSE_AI_API_KEY."
   });
+});
+
+/* ---- Pulse AI provisioning (local Ollama bootstrap) ---- */
+app.get("/api/ai/status", (_req, res) => {
+  res.json(ai.status());
+});
+
+app.post("/api/ai/setup", async (_req, res) => {
+  res.json(await ai.ensure());
+});
+
+app.post("/api/ai/recover", async (_req, res) => {
+  res.json(await ai.recover());
 });
 
 app.post("/api/chat", async (req, res) => {
@@ -173,5 +265,85 @@ const httpServer = http.createServer(app);
 attachOcpp(httpServer).then(() => {
   httpServer.listen(PORT, () => {
     console.log(`GRIDPULSE backend listening on port ${PORT}`);
+    startDemoSims(PORT);
   });
 });
+
+/* ---- Pulse AI: provision local Ollama in the background on boot,
+   never blocking the rest of the app. A recovery loop re-starts the
+   engine if it stops later. Set GRIDPULSE_AI_PROVIDER=cloud to opt
+   out and keep the legacy remote-provider path. ---- */
+if (ai.localEnabled()) {
+  ai.ensure().then((s) => {
+    console.log(`[ai] Pulse AI provider=ollama arch=${s.arch} ready=${s.ready} phase=${s.phase}`);
+    if (!s.ready && s.message) console.log(`[ai] ${s.message}`);
+  });
+  const AI_RECOVER_MS = Number(process.env.GRIDPULSE_AI_RECOVER_MS || 30000);
+  setInterval(() => { ai.recover().catch(() => {}); }, AI_RECOVER_MS).unref();
+} else {
+  console.log(`[ai] Pulse AI local bootstrap disabled (provider=${chat.providerMode()}).`);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Demo protocol simulators — spawned so the Gateway page shows live  */
+/*  OCPP / MODBUS / OpenADR / ISO 15118 / VOLTTRON traffic out of the  */
+/*  box instead of waiting/standby/offline. Set DEMO_SIMS=0 to skip.   */
+/* ------------------------------------------------------------------ */
+function resolveScript(name) {
+  const candidates = [
+    path.join(__dirname, "..", "scripts", name),
+    path.join(__dirname, "scripts", name),
+  ];
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+function spawnSim(scriptPath, args, env, label) {
+  const bin = process.env.GRIDPULSE_SIM_BIN || process.execPath;
+  const cwd = path.dirname(scriptPath);
+  const child = spawn(bin, [scriptPath, ...args], { cwd, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  const tag = `[sim:${label}]`;
+  child.stdout.on("data", (d) => process.stdout.write(`${tag} ${d}`));
+  child.stderr.on("data", (d) => process.stderr.write(`${tag} ${d}`));
+  child.on("exit", (code, sig) => {
+    if (code === 0) return;
+    console.log(`[sim:${label}] exited (code=${code} sig=${sig || "none"}) — protocol will show untilting until it restarts on next boot.`);
+  });
+  return child;
+}
+
+function startDemoSims(port) {
+  if (process.env.DEMO_SIMS === "0") {
+    console.log("DEMO_SIMS=0 — leaving protocol sources quiet (waiting/standby/offline).");
+    return;
+  }
+  const base = `http://localhost:${port}`;
+  const wsBase = `ws://localhost:${port}`;
+  const wanted = (process.env.DEMO_SIMS || "ocpp,modbus,openadr,josev,volttron").split(",").map((s) => s.trim());
+
+  if (wanted.includes("ocpp")) {
+    const p = resolveScript("ocpp-sim.js");
+    if (p) spawnSim(p, [wsBase], {}, "ocpp");
+    else console.log("[sim:ocpp] script not found — skipped");
+  }
+  if (wanted.includes("modbus")) {
+    const p = resolveScript("modbus-sim.js");
+    if (p) spawnSim(p, ["5000", base], {}, "modbus");
+    else console.log("[sim:modbus] script not found — skipped");
+  }
+  if (wanted.includes("openadr")) {
+    const p = resolveScript("ven-node.js");
+    if (p) spawnSim(p, [base, "GRIDPULSE-VEN-1"], {}, "openadr");
+    else console.log("[sim:openadr] script not found — skipped");
+  }
+  if (wanted.includes("josev") || wanted.includes("volttron")) {
+    const p = resolveScript("ingest-bridges.js");
+    if (p) {
+      const interval = Number(process.env.SIM_BRIDGE_INTERVAL_MS || 60000);
+      const run = (n) => spawnSim(p, [base], {}, `ingest#${n}`);
+      run(0);
+      setInterval(() => run(new Date().getTime()), interval); // re-roll V2G/volttron events
+    } else {
+      console.log("[sim:bridges] script not found — skipped");
+    }
+  }
+}

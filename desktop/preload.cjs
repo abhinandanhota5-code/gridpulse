@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("gridpulse", {
   health: () => ipcRenderer.invoke("health"),
+  aiStatus: () => ipcRenderer.invoke("ai-status"),
   openDashboard: () => ipcRenderer.invoke("open-dashboard"),
   openSetup: () => ipcRenderer.invoke("open-setup"),
   openExternal: (url) => ipcRenderer.invoke("open-external", url),

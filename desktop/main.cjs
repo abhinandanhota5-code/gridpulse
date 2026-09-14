@@ -317,6 +317,12 @@ async function collectHealth() {
   return report;
 }
 ipcMain.handle("health", () => collectHealth());
+  ipcMain.handle("ai-status", async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/ai/status`, { signal: AbortSignal.timeout(2000) });
+      return await res.json();
+    } catch (_) { return { provider: "ollama", phase: "unknown" }; }
+  });
 ipcMain.handle("open-dashboard", () => openDashboard());
 ipcMain.handle("open-setup", () => showSetup());
 ipcMain.handle("open-external", (_e, url) => shell.openExternal(url));
