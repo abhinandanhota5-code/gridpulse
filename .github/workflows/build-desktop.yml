@@ -99,7 +99,10 @@ jobs:
             export CSC_LINK="$CSC_LINK_RAW"
             export CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD_RAW"
             export CSC_IDENTITY_AUTO_DISCOVERY=true
-            # Flip to real signing + notarization when certs are present.
+            # Flip to real Developer ID signing + notarization when certs are
+            # present. Unsigned builds keep identity:null and rely on
+            # afterPack.cjs for a proper ad-hoc signature (Gatekeeper otherwise
+            # shows "damaged" on Apple Silicon).
             node -e "
               const fs=require('fs'), p='package.json';
               const cfg=JSON.parse(fs.readFileSync(p,'utf8'));

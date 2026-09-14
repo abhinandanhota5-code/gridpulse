@@ -1,6 +1,6 @@
 {
   "name": "gridpulse-desktop",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "GRIDPULSE Desktop — EV charging dashboards for driver and fleet owner. Ships its own runtime; nothing to install.",
   "main": "main.cjs",
   "license": "Apache-2.0",
@@ -14,7 +14,7 @@
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac dmg zip --publish never",
     "dist:win": "electron-builder --win nsis zip --publish never",
-    "check": "node --check main.cjs && node --check preload.cjs"
+    "check": "node --check main.cjs && node --check preload.cjs && node --check afterPack.cjs"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -32,6 +32,7 @@
     "appId": "com.gridpulse.app",
     "productName": "GRIDPULSE",
     "npmRebuild": false,
+    "afterPack": "./afterPack.cjs",
     "directories": {
       "output": "release"
     },
@@ -46,7 +47,7 @@
     "mac": {
       "category": "public.app-category.utilities",
       "icon": "assets/icon.png",
-      "identity": "",
+      "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "entitlements": null,
